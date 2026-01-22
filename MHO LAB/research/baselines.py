@@ -7,7 +7,11 @@ class PSO:
         self.c1, self.c2, self.w = c1, c2, w
 
     def optimize(self, objective_fn, bounds, dim, max_iterations=200):
-        positions = np.random.uniform(bounds[0], bounds[1], (self.pop_size, dim))
+        # Handle both scalar and array bounds
+        lb = np.array(bounds[0]) if hasattr(bounds[0], '__len__') else np.full(dim, bounds[0])
+        ub = np.array(bounds[1]) if hasattr(bounds[1], '__len__') else np.full(dim, bounds[1])
+        
+        positions = np.random.uniform(lb, ub, (self.pop_size, dim))
         velocities = np.random.uniform(-0.1, 0.1, (self.pop_size, dim))
         pbest_positions = positions.copy()
         pbest_fitness = np.array([objective_fn(p) for p in positions])
@@ -25,7 +29,7 @@ class PSO:
                     self.c2 * r2 * (positions[gbest_idx] - positions[i])
                 )
 
-                positions[i] = np.clip(positions[i] + velocities[i], bounds[0], bounds[1])
+                positions[i] = np.clip(positions[i] + velocities[i], lb, ub)
                 fitness_i = objective_fn(positions[i])
 
                 if fitness_i < pbest_fitness[i]:
@@ -45,7 +49,11 @@ class GWO:
         self.pop_size = pop_size
 
     def optimize(self, objective_fn, bounds, dim, max_iterations=200):
-        positions = np.random.uniform(bounds[0], bounds[1], (self.pop_size, dim))
+        # Handle both scalar and array bounds
+        lb = np.array(bounds[0]) if hasattr(bounds[0], '__len__') else np.full(dim, bounds[0])
+        ub = np.array(bounds[1]) if hasattr(bounds[1], '__len__') else np.full(dim, bounds[1])
+        
+        positions = np.random.uniform(lb, ub, (self.pop_size, dim))
         fitness = np.array([objective_fn(p) for p in positions])
 
         sorted_indices = np.argsort(fitness)
@@ -74,7 +82,7 @@ class GWO:
                     C3 = 2 * r2
                     X3 = delta_pos[d] - A3 * abs(C3 * delta_pos[d] - positions[i, d])
 
-                    positions[i, d] = np.clip((X1 + X2 + X3) / 3, bounds[0], bounds[1])
+                    positions[i, d] = np.clip((X1 + X2 + X3) / 3, lb[d], ub[d])
 
             fitness = np.array([objective_fn(p) for p in positions])
             sorted_indices = np.argsort(fitness)
@@ -140,7 +148,11 @@ class DE:
         self.CR = CR  # Crossover probability
 
     def optimize(self, objective_fn, bounds, dim, max_iterations=200):
-        population = np.random.uniform(bounds[0], bounds[1], (self.pop_size, dim))
+        # Handle both scalar and array bounds
+        lb = np.array(bounds[0]) if hasattr(bounds[0], '__len__') else np.full(dim, bounds[0])
+        ub = np.array(bounds[1]) if hasattr(bounds[1], '__len__') else np.full(dim, bounds[1])
+        
+        population = np.random.uniform(lb, ub, (self.pop_size, dim))
         fitness = np.array([objective_fn(p) for p in population])
         convergence = []
 
@@ -151,7 +163,7 @@ class DE:
 
                 # Mutation: create mutant vector
                 mutant = population[a] + self.F * (population[b] - population[c])
-                mutant = np.clip(mutant, bounds[0], bounds[1])
+                mutant = np.clip(mutant, lb, ub)
 
                 # Crossover: create trial vector
                 trial = population[i].copy()

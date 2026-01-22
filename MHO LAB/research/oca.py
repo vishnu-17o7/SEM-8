@@ -132,6 +132,3 @@ class OverclockingAlgorithm:
                 self.positions[i] = self.clip(self.positions[i] + self.velocities[i] * 0.5) # 0.5 is learning rate
 
         return self.p_cores_pos[0], gbest_fit, convergence_curve
-
-    plt.grid(True)
-    plt.show()
