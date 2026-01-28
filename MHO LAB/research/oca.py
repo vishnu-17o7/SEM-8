@@ -22,10 +22,12 @@ class OverclockingAlgorithm:
     5. INSTRUCTION PIPELINING (Momentum): Successful moves carry momentum.
     """
 
-    def __init__(self, pop_size: int = 30):
+    def __init__(self, pop_size: int = 30, aggressive_voltage: bool = False):
         self.pop_size = pop_size
         # P-Cores count (Top 3 leaders)
         self.num_p_cores = 3
+        # Aggressive Voltage Scaling for stable environments
+        self.aggressive_voltage = aggressive_voltage
 
     def initialize(self, bounds: Tuple, dim: int):
         self.dim = dim
@@ -46,6 +48,10 @@ class OverclockingAlgorithm:
         # Leaders (P-Cores)
         self.p_cores_pos = np.zeros((self.num_p_cores, dim))
         self.p_cores_fit = np.full(self.num_p_cores, np.inf)
+        
+        # Temperature tracking for aggressive voltage
+        self.temperature_history = []
+        self.last_best_fitness = np.inf
 
     def clip(self, val):
         return np.clip(val, self.lower, self.upper)
@@ -74,9 +80,28 @@ class OverclockingAlgorithm:
             gbest_fit = self.p_cores_fit[0]
             convergence_curve.append(gbest_fit)
             
+            # Calculate "Temperature" (rate of improvement)
+            fitness_improvement = self.last_best_fitness - gbest_fit
+            temperature = abs(fitness_improvement) / (abs(self.last_best_fitness) + 1e-10)
+            self.temperature_history.append(temperature)
+            self.last_best_fitness = gbest_fit
+            
             # 3. Dynamic Voltage (Exploration Rate)
-            # Decays from 2.0 to 0.0 (Linear) - Similar to GWO 'a' parameter
-            voltage = 2.0 * (1 - (it / max_iterations))
+            # Base voltage decays from 2.0 to 0.0 (Linear) - Similar to GWO 'a' parameter
+            base_voltage = 2.0 * (1 - (it / max_iterations))
+            
+            # Aggressive Voltage Scaling: boost when temperature is low (stable)
+            if self.aggressive_voltage:
+                # If temperature is low (< 0.01), system is stable - increase exploration
+                avg_temp = np.mean(self.temperature_history[-5:]) if len(self.temperature_history) >= 5 else temperature
+                if avg_temp < 0.01 and it < max_iterations * 0.7:  # Only in first 70% of iterations
+                    # Boost voltage by up to 50% when very stable
+                    voltage_boost = 1.5
+                    voltage = base_voltage * voltage_boost
+                else:
+                    voltage = base_voltage
+            else:
+                voltage = base_voltage
             
             # 4. Update Positions
             for i in range(self.pop_size):

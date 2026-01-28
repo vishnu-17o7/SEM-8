@@ -220,7 +220,11 @@ def setup_scenario_b_high_noise(env: WarehouseEnvironment):
 
 def run_algorithm(algo_name, algo_class, adapter, max_iter=50, pop_size=20, **kwargs):
     """Run a single algorithm on the path planning problem"""
-    optimizer = algo_class(pop_size=pop_size, **kwargs)
+    # Handle callable factories (like lambda for OCA-Aggressive)
+    if callable(algo_class) and algo_name == 'OCA-Aggressive':
+        optimizer = algo_class(pop_size)
+    else:
+        optimizer = algo_class(pop_size=pop_size, **kwargs)
     
     start_time = time.time()
     best_pos, best_fitness, convergence = optimizer.optimize(
@@ -253,7 +257,11 @@ def run_dynamic_scenario(algo_class, adapter, n_updates=10, **kwargs):
         
         # Re-optimize path
         start_time = time.time()
-        optimizer = algo_class(pop_size=10, **kwargs)
+        # Handle callable factories
+        if callable(algo_class) and not hasattr(algo_class, 'optimize'):
+            optimizer = algo_class(10)
+        else:
+            optimizer = algo_class(pop_size=10, **kwargs)
         best_pos, best_fitness, _ = optimizer.optimize(
             objective_fn=adapter.objective_function,
             bounds=(0, 1),
@@ -285,6 +293,7 @@ def run_full_benchmark():
     # Algorithms to test
     algorithms = {
         'OCA': OverclockingAlgorithm,
+        'OCA-Aggressive': lambda pop_size: OverclockingAlgorithm(pop_size=pop_size, aggressive_voltage=True),
         'PSO': PSO,
         'GWO': GWO,
     }
