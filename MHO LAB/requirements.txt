@@ -1,0 +1,99 @@
+# Core Dependencies for OCA Research Project
+# Python 3.10+ recommended
+
+# Numerical Computing
+numpy>=1.24.0,<2.0.0
+scipy>=1.10.0
+
+# Visualization
+matplotlib>=3.7.0
+
+# Optimization & Machine Learning
+scikit-learn>=1.3.0
+
+# Hyperparameter Optimization Benchmarks
+ConfigSpace>=0.7.0
+openml>=0.14.0
+simple-hpo-bench>=0.1.0
+
+# Data Processing
+pandas>=2.0.0
+
+# Progress Bars (optional but useful)
+tqdm>=4.65.0
+
+# Testing (optional)
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Code Quality (optional)
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.5.0
+
+# ============================================================================
+# OPTIONAL: NASBench-101 Official Dataset Support
+# ============================================================================
+# NOTE: Official NASBench requires TensorFlow 1.x which only works with Python 3.7
+# If you want to use the official NASBench dataset:
+#
+# 1. Create separate environment with Python 3.7:
+#    conda create -n nasbench python=3.7
+#    conda activate nasbench
+#
+# 2. Install TensorFlow 1.x:
+#    pip install tensorflow==1.15.0
+#
+# 3. Install nasbench:
+#    pip install nasbench
+#    OR
+#    git clone https://github.com/google-research/nasbench
+#    pip install -e ./nasbench
+#
+# 4. Download dataset (~499 MB):
+#    curl -O https://storage.googleapis.com/nasbench/nasbench_only108.tfrecord
+#
+# Uncomment below ONLY if using Python 3.7 environment:
+# tensorflow==1.15.0
+# nasbench>=1.0.0
+
+# ============================================================================
+# Alternative: Use surrogate mode in nasBench_official.py (no TF required)
+# Run: python research/nasBench_official.py --demo
+# ============================================================================
+
+# ============================================================================
+# Jupyter Notebook Support (if using .ipynb files)
+# ============================================================================
+jupyter>=1.0.0
+ipykernel>=6.25.0
+notebook>=7.0.0
+
+# ============================================================================
+# Installation Instructions
+# ============================================================================
+# 1. Create virtual environment:
+#    python -m venv .venv
+#
+# 2. Activate:
+#    Windows: .venv\Scripts\activate
+#    Linux/Mac: source .venv/bin/activate
+#
+# 3. Install dependencies:
+#    pip install -r requirements.txt
+#
+# 4. For development mode (editable install):
+#    pip install -e .
+#
+# ============================================================================
+# Quick Test
+# ============================================================================
+# Test basic functionality:
+#    python -c "import numpy; from research.oca import OverclockingAlgorithm; print('✅ Core imports working')"
+#
+# Run benchmarks:
+#    python research/bbob_benchmark.py
+#    python research/nas_benchmark.py
+#    python research/nasBench_official.py --demo
+#
+# ============================================================================

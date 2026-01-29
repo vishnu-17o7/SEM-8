@@ -81,8 +81,15 @@ class OverclockingAlgorithm:
             convergence_curve.append(gbest_fit)
             
             # Calculate "Temperature" (rate of improvement)
-            fitness_improvement = self.last_best_fitness - gbest_fit
-            temperature = abs(fitness_improvement) / (abs(self.last_best_fitness) + 1e-10)
+            if np.isinf(self.last_best_fitness) or np.isnan(self.last_best_fitness):
+                # First iteration or invalid value
+                temperature = 1.0
+            else:
+                fitness_improvement = self.last_best_fitness - gbest_fit
+                denominator = max(abs(self.last_best_fitness), abs(gbest_fit), 1e-10)
+                temperature = abs(fitness_improvement) / denominator
+                temperature = np.clip(temperature, 0, 1)  # Keep bounded
+            
             self.temperature_history.append(temperature)
             self.last_best_fitness = gbest_fit
             
