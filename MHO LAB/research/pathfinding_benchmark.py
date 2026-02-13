@@ -155,37 +155,44 @@ class RobotNavigation:
                 self.obstacles.append((x, 40, 4))
 
     def _segment_intersects_circle(self, p1, p2, circle):
-        """Check if line segment p1-p2 hits a circular obstacle."""
+        """Check if line segment p1-p2 hits a circular obstacle. Optimized version."""
         cx, cy, r = circle
-        center = np.array([cx, cy])
         
-        # Vector from p1 to p2
-        d = p2 - p1
-        f = p1 - center
+        # Use numpy-free math for speed
+        dx = p2[0] - p1[0]
+        dy = p2[1] - p1[1]
+        fx = p1[0] - cx
+        fy = p1[1] - cy
         
-        # Quadratic formula components for intersection
-        a = np.dot(d, d)
+        # Quadratic formula components
+        a = dx*dx + dy*dy
         if a < 1e-10:  # Points are the same
-            return np.linalg.norm(p1 - center) < r
+            dist_sq = fx*fx + fy*fy
+            return dist_sq < r*r
             
-        b = 2 * np.dot(f, d)
-        c = np.dot(f, f) - r**2
+        b = 2 * (fx*dx + fy*dy)
+        c = fx*fx + fy*fy - r*r
         
-        discriminant = b**2 - 4*a*c
+        discriminant = b*b - 4*a*c
         
         if discriminant < 0:
             return False  # No intersection
             
-        # Check if intersection points are actually on the segment
-        discriminant = np.sqrt(discriminant)
-        t1 = (-b - discriminant) / (2*a + 1e-6)
-        t2 = (-b + discriminant) / (2*a + 1e-6)
+        # Check if intersection points are on the segment
+        sqrt_disc = discriminant ** 0.5
+        denom = 2*a + 1e-10
+        t1 = (-b - sqrt_disc) / denom
+        t2 = (-b + sqrt_disc) / denom
         
         if (0 <= t1 <= 1) or (0 <= t2 <= 1):
             return True
         
-        # Also check if segment is completely inside circle
-        if np.linalg.norm(p1 - center) < r or np.linalg.norm(p2 - center) < r:
+        # Check endpoints inside circle
+        if fx*fx + fy*fy < r*r:
+            return True
+        ex = p2[0] - cx
+        ey = p2[1] - cy
+        if ex*ex + ey*ey < r*r:
             return True
             
         return False
