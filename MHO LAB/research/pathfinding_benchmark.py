@@ -612,19 +612,201 @@ def run_scenario_demo():
 
 
 # ==========================================
+# OCA Hyperparameter Tuning
+# ==========================================
+
+def run_hyperparam_tuning():
+    """
+    Grid-search over OCA hyperparameters on a representative set of
+    pathfinding scenarios and report the best configuration.
+
+    Hyperparameters explored
+    ------------------------
+    pop_size         : population size
+    num_p_cores      : number of P-Core leaders
+    initial_voltage  : DVFS start magnitude
+    final_voltage    : DVFS end magnitude
+    aggressive_voltage: stability-based exploration boost
+    """
+
+    print("\n" + "╔" + "═" * 78 + "╗")
+    print("║" + " " * 15 + "OCA HYPERPARAMETER TUNING SUITE" + " " * 32 + "║")
+    print("║" + f"  Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}" + " " * 47 + "║")
+    print("╚" + "═" * 78 + "╝")
+
+    # ── Tuning configuration ─────────────────────────────────────────────────
+    TUNING_SCENARIOS   = ['Sparse', 'Trap', 'Maze', 'Clutter']
+    TUNING_WAYPOINTS   = [5, 8]
+    RUNS_PER_CONFIG    = 3          # independent runs per hyperparameter combo
+    MAX_ITER           = 150
+
+    # Search grid
+    GRID = {
+        'pop_size'          : [20, 30, 40, 60],
+        'num_p_cores'       : [2, 3, 5, 7],
+        'initial_voltage'   : [1.5, 2.0, 2.5],
+        'final_voltage'     : [0.0, 0.1, 0.2],
+        'aggressive_voltage': [False, True],
+    }
+
+    import itertools
+
+    # Build full grid, filtering invalid combos (num_p_cores must be < pop_size)
+    keys   = list(GRID.keys())
+    combos = [
+        dict(zip(keys, vals))
+        for vals in itertools.product(*GRID.values())
+        if vals[1] < vals[0]          # num_p_cores < pop_size
+    ]
+
+    total = len(combos)
+    print(f"\n  Grid size: {total} valid hyperparameter combinations")
+    print(f"  Evaluated on: {TUNING_SCENARIOS} × waypoints {TUNING_WAYPOINTS}")
+    print(f"  Runs per combo: {RUNS_PER_CONFIG} | Max iterations: {MAX_ITER}")
+    print(f"  Total algorithm runs: {total * len(TUNING_SCENARIOS) * len(TUNING_WAYPOINTS) * RUNS_PER_CONFIG:,}\n")
+
+    # ── Pre-build problem instances (reused across combos) ───────────────────
+    problems = {
+        (s, w): RobotNavigation(n_waypoints=w, scenario=s)
+        for s in TUNING_SCENARIOS
+        for w in TUNING_WAYPOINTS
+    }
+
+    # ── Evaluate every combo ─────────────────────────────────────────────────
+    leaderboard = []   # list of (mean_score, valid_ratio, combo, detail_rows)
+
+    col_w = 22
+    print(f"  {'#':<6} {'pop':>5} {'p':>4} {'v0':>5} {'vf':>5} {'agg':>5}"
+          f" | {'mean_cost':>10} {'valid%':>7} {'time':>8}")
+    print("  " + "-" * 6 + "-+-" + "-" * 5 + "-" * 4 + "-" * 5 + "-" * 5 + "-" * 5
+          + "-+-" + "-" * 10 + "-" * 7 + "-" * 8)
+
+    for idx, combo in enumerate(combos, 1):
+        all_costs  = []
+        all_valid  = []
+        all_times  = []
+
+        for (scenario, n_wp), problem in problems.items():
+            for _ in range(RUNS_PER_CONFIG):
+                algo = OverclockingAlgorithm(**combo)
+                t0 = time.time()
+                try:
+                    pos, cost, _ = algo.optimize(
+                        objective_fn=problem.evaluate,
+                        bounds=problem.bounds,
+                        dim=problem.dim,
+                        max_iterations=MAX_ITER,
+                    )
+                    elapsed = time.time() - t0
+                    all_costs.append(cost)
+                    all_valid.append(problem.is_valid_path(pos))
+                    all_times.append(elapsed)
+                except Exception:
+                    all_costs.append(float('inf'))
+                    all_valid.append(False)
+                    all_times.append(0.0)
+
+        mean_cost   = np.mean(all_costs)
+        valid_ratio = np.mean(all_valid)
+        mean_time   = np.mean(all_times)
+
+        leaderboard.append((mean_cost, -valid_ratio, combo, valid_ratio, mean_time))
+
+        agg_str = "Y" if combo['aggressive_voltage'] else "N"
+        print(f"  {idx:<6} {combo['pop_size']:>5} {combo['num_p_cores']:>4}"
+              f" {combo['initial_voltage']:>5.1f} {combo['final_voltage']:>5.1f} {agg_str:>5}"
+              f" | {mean_cost:>10.2f} {valid_ratio*100:>6.1f}% {mean_time:>7.3f}s")
+
+    # ── Sort: valid paths first, then by mean cost ───────────────────────────
+    leaderboard.sort(key=lambda x: (x[1], x[0]))  # (-valid_ratio, mean_cost)
+
+    # ── Results table ────────────────────────────────────────────────────────
+    print("\n" + "=" * 90)
+    print("                         TOP-10 OCA HYPERPARAMETER CONFIGURATIONS")
+    print("=" * 90)
+    print(f"  {'Rank':<6} {'pop':>5} {'p_cores':>8} {'v_init':>7} {'v_fin':>6}"
+          f" {'agg':>5} | {'mean_cost':>10} {'valid%':>7} {'time':>8}")
+    print("  " + "-" * 88)
+
+    for rank, (mean_cost, neg_vr, combo, valid_ratio, mean_time) in enumerate(leaderboard[:10], 1):
+        medal = ("1st", "2nd", "3rd") + tuple(str(i) + "th" for i in range(4, 11))
+        agg_str = "Y" if combo['aggressive_voltage'] else "N"
+        print(f"  {medal[rank-1]:<6} {combo['pop_size']:>5} {combo['num_p_cores']:>8}"
+              f" {combo['initial_voltage']:>7.1f} {combo['final_voltage']:>6.1f}"
+              f" {agg_str:>5} | {mean_cost:>10.2f} {valid_ratio*100:>6.1f}% {mean_time:>7.3f}s")
+
+    best_mean_cost, _, best_combo, best_valid, best_time = leaderboard[0]
+    print("\n" + "=" * 90)
+    print("  BEST CONFIGURATION:")
+    print(f"    pop_size          = {best_combo['pop_size']}")
+    print(f"    num_p_cores       = {best_combo['num_p_cores']}")
+    print(f"    initial_voltage   = {best_combo['initial_voltage']}")
+    print(f"    final_voltage     = {best_combo['final_voltage']}")
+    print(f"    aggressive_voltage= {best_combo['aggressive_voltage']}")
+    print(f"    → mean cost {best_mean_cost:.2f}  |  valid {best_valid*100:.1f}%  |  avg time {best_time:.3f}s")
+    print("=" * 90)
+
+    # ── Heatmap: num_p_cores vs initial_voltage (fixed best pop & aggressive) ─
+    print("\n  Generating heatmap (num_p_cores × initial_voltage) …")
+    pc_vals  = sorted(set(c['num_p_cores']       for c in combos))
+    iv_vals  = sorted(set(c['initial_voltage']   for c in combos))
+    heatmap  = np.full((len(pc_vals), len(iv_vals)), np.nan)
+
+    for mean_cost, _, combo, _, _ in leaderboard:
+        if (combo['pop_size']           == best_combo['pop_size'] and
+                combo['final_voltage']  == best_combo['final_voltage'] and
+                combo['aggressive_voltage'] == best_combo['aggressive_voltage']):
+            r = pc_vals.index(combo['num_p_cores'])
+            c = iv_vals.index(combo['initial_voltage'])
+            if np.isnan(heatmap[r, c]):   # keep first (best) match
+                heatmap[r, c] = mean_cost
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    im = ax.imshow(heatmap, aspect='auto', cmap='RdYlGn_r',
+                   interpolation='nearest')
+    ax.set_xticks(range(len(iv_vals)))
+    ax.set_xticklabels([f"{v:.1f}" for v in iv_vals])
+    ax.set_yticks(range(len(pc_vals)))
+    ax.set_yticklabels(pc_vals)
+    ax.set_xlabel('initial_voltage')
+    ax.set_ylabel('num_p_cores')
+    ax.set_title(
+        f"OCA Mean Cost Heatmap\npop={best_combo['pop_size']}, "
+        f"final_v={best_combo['final_voltage']}, "
+        f"agg={best_combo['aggressive_voltage']}"
+    )
+    for r in range(len(pc_vals)):
+        for c in range(len(iv_vals)):
+            if not np.isnan(heatmap[r, c]):
+                ax.text(c, r, f"{heatmap[r, c]:.0f}",
+                        ha='center', va='center', fontsize=8, color='black')
+    plt.colorbar(im, ax=ax, label='Mean Cost')
+    plt.tight_layout()
+    heatmap_path = 'oca_hyperparam_heatmap.png'
+    plt.savefig(heatmap_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"  Saved heatmap → {heatmap_path}")
+
+    return best_combo, leaderboard
+
+
+# ==========================================
 # Main Entry Point
 # ==========================================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Pathfinding Benchmark Suite')
-    parser.add_argument('--quick', action='store_true', help='Run quick test only')
-    parser.add_argument('--full', action='store_true', help='Run full benchmark')
-    parser.add_argument('--demo', action='store_true', help='Visualize scenarios only')
-    
+    parser.add_argument('--quick',  action='store_true', help='Run quick test only')
+    parser.add_argument('--full',   action='store_true', help='Run full benchmark')
+    parser.add_argument('--demo',   action='store_true', help='Visualize scenarios only')
+    parser.add_argument('--tune',   action='store_true', help='Run OCA hyperparameter tuning')
+
     args = parser.parse_args()
-    
+
     if args.quick:
         run_quick_test()
     elif args.demo:
         run_scenario_demo()
+    elif args.tune:
+        run_hyperparam_tuning()
     else:
         run_benchmark()

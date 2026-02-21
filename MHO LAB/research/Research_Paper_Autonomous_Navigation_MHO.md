@@ -109,7 +109,23 @@ Comparative evaluation against A*, APF, and RRT* demonstrated superior performan
 
 Modern path planning increasingly incorporates machine learning techniques [7]. Deep Reinforcement Learning (DRL) methods including Deep Q-Networks (DQN) and Actor-Critic algorithms learn navigation policies directly from sensor observations. While promising for handling uncertainty and complex dynamics, these approaches require significant training data and computational resources.
 
-### 2.5 Summary of Literature
+### 2.5 Consolidation Table: Literature Review
+
+Table 1 summarizes the key path planning algorithms reviewed, organized by category with their primary characteristics and performance.
+
+**Table 1: Summary of Reviewed Path Planning Algorithms**
+
+| Category | Representative Algorithms | Key Strengths | Key Limitations | Best Application |
+|----------|--------------------------|---------------|-----------------|------------------|
+| Classical Graph-Based | A*, D* Lite, Theta* | Optimal, deterministic | Poor scalability, grid artifacts | Static environments |
+| Sampling-Based | RRT*, PRM | High-dimensional capable | Jerky paths, post-processing | Complex spaces |
+| Potential Field | APF | Real-time, simple | Local minima traps | Reactive navigation |
+| Swarm Intelligence | PSO, ACO, GWO | Global search, parallelism | Parameter sensitivity | Mobile robots, UAVs |
+| Evolutionary | GA, DE | Strong exploration | Slow convergence | Multi-objective tasks |
+| Hybrid Methods | NCM-GWO, ABGPSO, PFACO | 10-25% improvement over base | Implementation complexity | Complex constrained environments |
+| Learning-Based | DRL (DQN, A3C) | Handles uncertainty | Training data required | Dynamic environments |
+
+### 2.6 Summary of Literature
 
 The reviewed literature reveals several key trends:
 
@@ -247,6 +263,23 @@ For systematic comparison, the following metrics are employed:
 4. **Success Rate (SR):** Percentage of trials finding valid paths
 5. **Path Improvement Rate (PIR):** Relative improvement over baseline methods
 
+### 3.8 Consolidation Table: Methods and Mathematical Formulations
+
+Table 2 consolidates the key meta-heuristic methods with their core mechanisms and exploration-exploitation strategies.
+
+**Table 2: Summary of Meta-Heuristic Methods for Path Planning**
+
+| Algorithm | Core Mechanism | Key Parameters | Exploration-Exploitation Strategy | Reported Improvement |
+|-----------|----------------|----------------|----------------------------------|----------------------|
+| GWO | Wolf hierarchy hunting | a (2→0 linear) | Linear decay of search range | Baseline |
+| NCM-GWO | GWO + Cuckoo + Multi-population | a (nonlinear) | Lévy flights + diversity maintenance | 15-25% over GWO |
+| PSO | Velocity-position update | w, c₁, c₂ | Inertia weight decay | ~25% of applications |
+| ABGPSO | PSO + Sigmoid adaptation | α, β (time-varying) | Automatic sigmoid transition | 8-12% over PSO |
+| ACO | Pheromone trail following | α, β, ρ | Pheromone accumulation/evaporation | Baseline |
+| PFACO | ACO + Focused pheromone | ADPI initialization | Focused pheromone + turn penalty | Best among ACO variants |
+| FA/EFA | Brightness attraction | α (linear decay) | Distance-based, early explore/late exploit | 0.1-10% over FA |
+| SmartExplorer1.0 | DTM-based cost matrix | Terrain weights | Multi-factor terrain integration | Superior safety margins |
+
 ---
 
 ## 4. Results
@@ -377,15 +410,64 @@ Swarm-based algorithms naturally extend to multi-agent coordination. The pheromo
 
 **Logistics Robots:** ACO-based approaches [5] effectively handle time window constraints and multiple objectives in warehouse automation scenarios.
 
-### 5.4 Future Research Directions
+### 5.4 Future Research Directions and Identified Gaps
 
-Based on the reviewed literature and identified gaps, the following research directions emerge:
+Based on the reviewed literature and identified limitations, the following critical gaps and research directions emerge that warrant immediate attention:
+
+#### 5.4.1 Computational Efficiency Gap
+
+Current meta-heuristic algorithms suffer from significant computational overhead that limits real-time applicability. For instance, IHMACO [10] features 11 adjustable parameters requiring extensive tuning, while algorithms like GWO exhibit execution times 3-5x slower than simpler alternatives. There is a pressing need for:
+
+- **Vectorized algorithm architectures** that minimize nested loop computations
+- **Automatic parameter adaptation** mechanisms that eliminate manual tuning requirements
+- **Lightweight implementations** suitable for embedded systems with limited computational resources
+
+#### 5.4.2 Local Optima Escape Mechanisms
+
+Path planning in constrained environments with C-trap obstacles, narrow passages, and maze-like structures frequently causes algorithms to converge to local optima. The reviewed literature reveals that:
+
+- Standard ACO variants struggle with deceptive obstacle configurations [10]
+- Single-leader approaches (like basic GWO) are prone to premature convergence
+- Existing diversity maintenance mechanisms are often computationally expensive
+
+Future algorithms should incorporate **stagnation detection and intelligent reset mechanisms** that can identify when search agents become trapped and reinitialize them strategically near promising regions without sacrificing computational efficiency.
+
+#### 5.4.3 Path Smoothness and Momentum
+
+Many meta-heuristic approaches produce jerky, oscillatory paths that require post-processing smoothing. The literature indicates a gap in:
+
+- **Momentum-based position updates** that carry successful movement patterns forward
+- **Velocity tracking mechanisms** that prevent abrupt direction changes
+- **Integrated smoothness optimization** within the search process rather than as post-processing
+
+Algorithms incorporating instruction pipelining concepts from computer architecture could address this gap by maintaining movement history and applying inertia-based updates.
+
+#### 5.4.4 Multi-Leader Guidance Architecture
+
+While GWO's alpha-beta-delta hierarchy has proven effective, there remains opportunity for improvement in:
+
+- **Enhanced elitism** with more robust leader selection and replacement strategies
+- **Reduced sensitivity to leader quality** through averaging mechanisms across multiple elite solutions
+- **Dynamic leadership adaptation** based on optimization landscape characteristics
+
+#### 5.4.5 Adaptive Exploration-Exploitation Balance
+
+The reviewed algorithms use various strategies for balancing exploration and exploitation, but gaps remain in:
+
+- **Automatic transition mechanisms** that respond to optimization progress without manual scheduling
+- **Temperature-aware adaptation** that adjusts search intensity based on convergence rate
+- **Self-tuning parameters** that eliminate the need for problem-specific configuration
+
+#### 5.4.6 Additional Research Directions
 
 1. **Scalability Improvements:** Developing hierarchical and distributed optimization methods for large-scale environments
 2. **Real-Time Adaptation:** Integrating meta-heuristic optimization with reactive control for dynamic obstacle avoidance
 3. **Multi-Objective Optimization:** Advanced Pareto-based approaches balancing path quality, energy efficiency, and safety
 4. **Learning-Enhanced MHO:** Combining deep learning for environment understanding with meta-heuristic optimization for planning
 5. **Hardware Acceleration:** GPU-based parallel implementations for real-time performance in complex scenarios
+6. **Multi-Robot Coordination:** Parallel sub-population strategies for swarm path planning
+7. **Predictive Obstacle Avoidance:** Speculative look-ahead mechanisms for dynamic environments
+8. **Constraint-Aware Search:** Adaptive handling where constraint violations trigger conservative exploration modes
 
 ### 5.5 Practical Implementation Considerations
 
@@ -415,6 +497,8 @@ Key findings include:
 5. **Parameter adaptation mechanisms reduce tuning burden:** Time-varying parameters, as demonstrated in EFA [8] and ABGPSO [2], provide automatic balancing of exploration and exploitation.
 
 The meta-heuristic optimization paradigm offers a flexible and powerful framework for addressing the complex challenges of autonomous navigation in constrained environments. As robotic systems increasingly operate in unstructured and dynamic settings, the continued development of hybrid approaches integrating multiple optimization strategies with domain knowledge and learning capabilities will be essential for achieving robust and efficient autonomous navigation.
+
+The identified gaps in current research—particularly in computational efficiency, local optima escape mechanisms, path smoothness through momentum-based updates, multi-leader guidance architectures, and adaptive exploration-exploitation balance—present significant opportunities for novel algorithm development. Future algorithms that can achieve execution speeds 3x faster than current methods like GWO while maintaining competitive accuracy would be particularly valuable for real-time autonomous navigation applications. Additionally, mechanisms inspired by computer architecture concepts (such as stagnation detection analogous to cache misses, momentum-based updates similar to instruction pipelining, and automatic parameter adaptation akin to dynamic voltage scaling) represent promising directions that could address multiple identified limitations simultaneously.
 
 Future research should focus on scalability for large-scale environments, real-time adaptation for dynamic obstacles, and integration with deep learning methods for enhanced environment understanding. The frameworks and algorithms reviewed in this paper provide a solid foundation for advancing autonomous navigation capabilities across diverse robotic platforms and application domains.
 

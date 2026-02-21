@@ -1,5 +1,4 @@
 # Overclocking Algorithm (OCA) - Lite Edition
-# Python 3.8+
 
 import numpy as np
 import math
@@ -15,17 +14,39 @@ class OverclockingAlgorithm:
     competitive accuracy against GWO.
     
     Core Concepts:
-    1. P-CORES (Performance): The top 3 best solutions act as leaders (like GWO Alpha/Beta/Delta).
+    1. P-CORES (Performance): The top `num_p_cores` best solutions act as leaders (like GWO Alpha/Beta/Delta).
     2. E-CORES (Efficiency): The rest of the population follows the P-Cores.
-    3. DYNAMIC VOLTAGE (DVFS): Exploration parameter decays over time.
+    3. DYNAMIC VOLTAGE (DVFS): Exploration parameter decays from `initial_voltage` to `final_voltage` over time.
     4. CACHE MISS (Reset): Stagnant particles are re-initialized to maintain diversity.
     5. INSTRUCTION PIPELINING (Momentum): Successful moves carry momentum.
+
+    Hyperparameters
+    ---------------
+    pop_size         : Total number of cores (population size). Default 30.
+    num_p_cores      : Number of P-Core leaders. Must be < pop_size. Default 3.
+    initial_voltage  : Starting DVFS exploration magnitude (like GWO 'a' start). Default 2.0.
+    final_voltage    : Ending DVFS exploration magnitude at last iteration. Default 0.0.
+    aggressive_voltage: Boost exploration when system is stable (low temperature). Default False.
     """
 
-    def __init__(self, pop_size: int = 30, aggressive_voltage: bool = False):
+    def __init__(
+        self,
+        pop_size: int = 30,
+        aggressive_voltage: bool = False,
+        num_p_cores: int = 3,
+        initial_voltage: float = 2.0,
+        final_voltage: float = 0.0,
+    ):
+        if num_p_cores < 1:
+            raise ValueError("num_p_cores must be at least 1")
+        if num_p_cores >= pop_size:
+            raise ValueError("num_p_cores must be less than pop_size")
         self.pop_size = pop_size
-        # P-Cores count (Top 3 leaders)
-        self.num_p_cores = 3
+        # P-Cores count (leaders)
+        self.num_p_cores = num_p_cores
+        # DVFS voltage schedule
+        self.initial_voltage = initial_voltage
+        self.final_voltage = final_voltage
         # Aggressive Voltage Scaling for stable environments
         self.aggressive_voltage = aggressive_voltage
 
@@ -94,8 +115,9 @@ class OverclockingAlgorithm:
             self.last_best_fitness = gbest_fit
             
             # 3. Dynamic Voltage (Exploration Rate)
-            # Base voltage decays from 2.0 to 0.0 (Linear) - Similar to GWO 'a' parameter
-            base_voltage = 2.0 * (1 - (it / max_iterations))
+            # Base voltage decays from initial_voltage to final_voltage (Linear) - Similar to GWO 'a' parameter
+            t = it / max_iterations
+            base_voltage = self.initial_voltage + (self.final_voltage - self.initial_voltage) * t
             
             # Aggressive Voltage Scaling: boost when temperature is low (stable)
             if self.aggressive_voltage:
