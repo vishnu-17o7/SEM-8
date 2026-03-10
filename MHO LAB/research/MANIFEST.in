@@ -1,0 +1,10 @@
+recursive-exclude * __pycache__
+recursive-exclude * *.py[cod]
+recursive-exclude * *.tfrecord
+recursive-exclude * *.zip
+recursive-exclude * *.pptx
+recursive-exclude * *.docx
+recursive-exclude * *.png
+recursive-exclude * nasbench
+recursive-exclude * pathfinding_images
+recursive-exclude * "MHO PAPERS for path planning"

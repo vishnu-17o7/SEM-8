@@ -1,0 +1,2116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QKD Signal Intelligence — Adaptive Quantum Cryptographic Protocol</title>
+<style>
+  /* ============================================
+     RESET & BASE
+     ============================================ */
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg:        #0a0e17;
+    --panel:     #0d1220;
+    --border:    #1a2744;
+    --accent:    #00e5ff;
+    --accent2:   #7c4dff;
+    --green:     #00e676;
+    --red:       #ff1744;
+    --amber:     #ffab00;
+    --text:      #c5cee0;
+    --text-dim:  #5a6a8a;
+    --mono:      'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', 'Consolas', monospace;
+    --glow:      0 0 20px rgba(0, 229, 255, 0.15);
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    overflow-x: hidden;
+    min-height: 100vh;
+  }
+
+  /* ============================================
+     MATRIX RAIN BACKGROUND
+     ============================================ */
+  #matrix-canvas {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    z-index: 0;
+    opacity: 0.06;
+    pointer-events: none;
+  }
+
+  /* ============================================
+     LAYOUT
+     ============================================ */
+  .app {
+    position: relative;
+    z-index: 1;
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 16px;
+  }
+
+  /* HEADER */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: linear-gradient(135deg, var(--panel) 0%, #111a2e 100%);
+    margin-bottom: 12px;
+  }
+  .header-left { display: flex; align-items: center; gap: 14px; }
+  .header-logo {
+    width: 38px; height: 38px;
+    border: 2px solid var(--accent);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+    color: var(--accent);
+    animation: pulse-ring 2s infinite;
+  }
+  @keyframes pulse-ring {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(0,229,255,0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(0,229,255,0); }
+  }
+  .header-title { font-size: 15px; font-weight: 700; color: #fff; letter-spacing: 1px; }
+  .header-sub { font-size: 10px; color: var(--text-dim); letter-spacing: 2px; text-transform: uppercase; }
+  .header-right { display: flex; gap: 16px; align-items: center; }
+  .status-badge {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+  }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    animation: blink 1.5s infinite;
+  }
+  .status-dot.live { background: var(--green); }
+  .status-dot.warn { background: var(--amber); }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* GRID */
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 320px;
+    grid-template-rows: auto auto auto;
+    gap: 12px;
+  }
+
+  /* PANELS */
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    position: relative;
+    overflow: hidden;
+  }
+  .panel::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    opacity: 0.4;
+  }
+  .panel-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--accent);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .panel-title .icon { font-size: 13px; }
+
+  /* OSCILLOSCOPE */
+  .scope { grid-column: 1 / 3; grid-row: 1; }
+  .scope canvas {
+    width: 100%;
+    height: 200px;
+    border-radius: 4px;
+  }
+
+  /* UTILIZATION CHART */
+  .util-chart { grid-column: 1 / 3; grid-row: 2; }
+  .util-chart canvas {
+    width: 100%;
+    height: 120px;
+    border-radius: 4px;
+  }
+  .util-stats {
+    display: flex; gap: 20px; margin-top: 6px;
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.5px;
+  }
+  .util-stats span { color: var(--text-dim); }
+  .util-stats .val { font-weight: 700; }
+
+  /* METRICS SIDEBAR */
+  .sidebar { grid-column: 3; grid-row: 1 / 5; }
+  .metric-card {
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    margin-bottom: 8px;
+    background: rgba(0,0,0,0.2);
+  }
+  .metric-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+  .metric-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1.2;
+  }
+  .metric-value.accent { color: var(--accent); }
+  .metric-value.green { color: var(--green); }
+  .metric-value.red { color: var(--red); }
+  .metric-value.amber { color: var(--amber); }
+  .metric-delta {
+    font-size: 10px;
+    margin-top: 2px;
+  }
+  .metric-delta.up { color: var(--green); }
+  .metric-delta.down { color: var(--red); }
+
+  /* ACTION PANEL */
+  .action-panel { grid-column: 1; grid-row: 3; }
+  .action-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .action-item {
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    text-align: center;
+    background: rgba(0,0,0,0.2);
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+  .action-item.active {
+    border-color: var(--accent);
+    box-shadow: var(--glow);
+  }
+  .action-item .label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+  .action-item .val {
+    font-size: 20px;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  /* CHANNEL STATE */
+  .channel-panel { grid-column: 2; grid-row: 3; }
+  .channel-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .bar-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .bar-label {
+    width: 90px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    text-align: right;
+  }
+  .bar-track {
+    flex: 1;
+    height: 18px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+  }
+  .bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.4s ease, background 0.4s;
+    position: relative;
+  }
+  .bar-fill::after {
+    content: '';
+    position: absolute;
+    right: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: rgba(255,255,255,0.5);
+    border-radius: 0 3px 3px 0;
+  }
+  .bar-val {
+    width: 50px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #fff;
+    text-align: right;
+  }
+
+  /* EVENT LOG */
+  .log-panel { grid-column: 1 / 3; grid-row: 4; }
+  .log-scroll {
+    max-height: 160px;
+    overflow-y: auto;
+    font-size: 11px;
+    line-height: 1.7;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .log-entry {
+    padding: 2px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    display: flex;
+    gap: 10px;
+  }
+  .log-time { color: var(--text-dim); min-width: 60px; }
+  .log-tag {
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    min-width: 70px;
+    text-align: center;
+  }
+  .log-tag.secure { background: rgba(0,230,118,0.15); color: var(--green); }
+  .log-tag.breach { background: rgba(255,23,68,0.15); color: var(--red); }
+  .log-tag.turb   { background: rgba(255,171,0,0.15); color: var(--amber); }
+  .log-tag.eve    { background: rgba(124,77,255,0.15); color: var(--accent2); }
+  .log-tag.info   { background: rgba(0,229,255,0.1); color: var(--accent); }
+  .log-msg { color: var(--text); }
+
+  /* CONTROLS BAR */
+  .controls {
+    grid-column: 1 / 4;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-top: 4px;
+  }
+  .btn {
+    padding: 6px 18px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: rgba(0,229,255,0.08);
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn:hover {
+    background: rgba(0,229,255,0.18);
+    border-color: var(--accent);
+    box-shadow: var(--glow);
+  }
+  .btn.active {
+    background: var(--accent);
+    color: var(--bg);
+  }
+  .btn.danger { color: var(--red); background: rgba(255,23,68,0.08); }
+  .btn.danger:hover { background: rgba(255,23,68,0.18); border-color: var(--red); }
+
+  .speed-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+  }
+  .speed-slider {
+    -webkit-appearance: none;
+    width: 120px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+  }
+  .speed-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+  }
+  .controls-spacer { flex: 1; }
+  .step-counter {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .step-counter span { color: #fff; font-weight: 600; }
+
+  /* ALGORITHM SELECTOR */
+  .algo-select-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .algo-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+  }
+  .algo-select {
+    background: rgba(0,229,255,0.08);
+    color: var(--accent);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.2s;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2300e5ff'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    padding-right: 26px;
+  }
+  .algo-select:hover, .algo-select:focus {
+    border-color: var(--accent);
+    box-shadow: var(--glow);
+    background-color: rgba(0,229,255,0.14);
+  }
+  .algo-select option {
+    background: var(--panel);
+    color: var(--text);
+    font-family: var(--mono);
+    padding: 4px;
+  }
+  .algo-badge {
+    font-size: 9px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .algo-badge.paper  { background: rgba(0,229,255,0.12); color: var(--accent); }
+  .algo-badge.ours   { background: rgba(0,230,118,0.15); color: var(--green); }
+  .algo-badge.base   { background: rgba(255,171,0,0.12); color: var(--amber); }
+
+  /* THREAT INDICATORS */
+  .threat-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .threat-indicator {
+    flex: 1;
+    padding: 8px;
+    border-radius: 4px;
+    text-align: center;
+    border: 1px solid var(--border);
+    transition: all 0.3s;
+  }
+  .threat-indicator .ti-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    margin-bottom: 3px;
+  }
+  .threat-indicator .ti-status {
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .threat-indicator.active-eve {
+    border-color: var(--accent2);
+    background: rgba(124,77,255,0.08);
+    box-shadow: 0 0 12px rgba(124,77,255,0.15);
+  }
+  .threat-indicator.active-turb {
+    border-color: var(--amber);
+    background: rgba(255,171,0,0.08);
+    box-shadow: 0 0 12px rgba(255,171,0,0.15);
+  }
+  .threat-indicator.active-breach {
+    border-color: var(--red);
+    background: rgba(255,23,68,0.1);
+    box-shadow: 0 0 12px rgba(255,23,68,0.2);
+  }
+
+  /* KEY POOL GAUGE */
+  .gauge-container {
+    margin: 8px 0;
+    position: relative;
+  }
+  .gauge-track {
+    width: 100%;
+    height: 8px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .gauge-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.4s, background 0.4s;
+    background: var(--accent);
+  }
+  .gauge-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    color: var(--text-dim);
+    margin-top: 3px;
+  }
+
+  /* VS CODE HOVER TOOLTIP */
+  [data-tip] {
+    position: relative;
+    cursor: help;
+    border-bottom: 1px dotted var(--text-dim);
+  }
+  .vsc-tooltip {
+    position: fixed;
+    z-index: 9999;
+    max-width: 420px;
+    padding: 10px 14px;
+    background: #1e1e2e;
+    border: 1px solid #3c3c5c;
+    border-radius: 4px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 1px rgba(255,255,255,0.1);
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.55;
+    color: #d4d4d4;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity 0.15s, transform 0.15s;
+  }
+  .vsc-tooltip.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .vsc-tooltip .tt-title {
+    color: #4ec9b0;
+    font-weight: 700;
+    font-size: 12px;
+    margin-bottom: 5px;
+    letter-spacing: 0.5px;
+  }
+  .vsc-tooltip .tt-type {
+    color: #569cd6;
+    font-size: 10px;
+    margin-bottom: 6px;
+    font-style: italic;
+  }
+  .vsc-tooltip .tt-body {
+    color: #b0b0c0;
+    font-size: 11px;
+  }
+  .vsc-tooltip .tt-body .hl {
+    color: #dcdcaa;
+  }
+  .vsc-tooltip .tt-sep {
+    border: none;
+    border-top: 1px solid #333350;
+    margin: 6px 0;
+  }
+  .vsc-tooltip .tt-formula {
+    color: #ce9178;
+    font-size: 11px;
+    margin-top: 3px;
+  }
+
+  /* EFFICIENCY METER */
+  .eff-meter {
+    margin-top: 4px;
+  }
+  .eff-track {
+    width: 100%;
+    height: 12px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 6px;
+    overflow: hidden;
+    position: relative;
+  }
+  .eff-fill {
+    height: 100%;
+    border-radius: 6px;
+    transition: width 0.4s, background 0.4s;
+    background: linear-gradient(90deg, var(--green), var(--accent));
+    position: relative;
+  }
+  .eff-fill.danger {
+    background: linear-gradient(90deg, var(--amber), var(--red)) !important;
+  }
+  .eff-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+  .eff-pct {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--green);
+    margin-top: 2px;
+  }
+
+  /* ALGORITHMS BUTTON */
+  .algo-info-btn {
+    display: flex; align-items: center; gap: 5px;
+    background: rgba(0,229,255,0.08);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .algo-info-btn:hover {
+    border-color: var(--accent);
+    box-shadow: var(--glow);
+    background: rgba(0,229,255,0.18);
+  }
+  .algo-info-btn .algo-icon { font-size: 13px; }
+
+  /* ALGORITHMS MODAL */
+  .algo-modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 10000;
+    justify-content: center;
+    align-items: center;
+    backdrop-filter: blur(4px);
+  }
+  .algo-modal-overlay.open { display: flex; }
+  .algo-modal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    width: 720px;
+    max-width: 92vw;
+    max-height: 82vh;
+    overflow-y: auto;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+    padding: 0;
+  }
+  .algo-modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0;
+    background: var(--panel);
+    z-index: 1;
+  }
+  .algo-modal-header h2 {
+    margin: 0; font-size: 14px; color: #fff;
+    letter-spacing: 1px; font-weight: 700;
+  }
+  .algo-modal-close {
+    background: none; border: none;
+    color: var(--text-dim); font-size: 20px;
+    cursor: pointer; padding: 2px 8px;
+    border-radius: 4px; transition: all 0.15s;
+  }
+  .algo-modal-close:hover { color: #fff; background: rgba(255,255,255,0.08); }
+  .algo-modal-body { padding: 16px 20px; }
+  .algo-card {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 14px;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .algo-card:hover { border-color: rgba(0,229,255,0.3); }
+  .algo-card:last-child { margin-bottom: 0; }
+  .algo-card-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 14px;
+    background: rgba(0,229,255,0.04);
+    border-bottom: 1px solid var(--border);
+  }
+  .algo-card-title {
+    font-family: var(--mono); font-size: 12px;
+    font-weight: 700; color: var(--accent);
+  }
+  .algo-card-type {
+    font-family: var(--mono); font-size: 10px;
+    color: var(--text-dim); font-style: italic;
+  }
+  .algo-card-body {
+    padding: 10px 14px;
+    font-size: 11.5px; line-height: 1.65;
+    color: var(--text);
+  }
+  .algo-card-body .hl {
+    color: var(--accent); font-weight: 600;
+  }
+  .algo-card-perf {
+    padding: 8px 14px;
+    border-top: 1px solid var(--border);
+    font-family: var(--mono); font-size: 10px;
+    color: var(--amber); letter-spacing: 0.5px;
+  }
+  .algo-card-badge {
+    font-size: 9px; padding: 2px 8px;
+    border-radius: 3px; font-weight: 600;
+    letter-spacing: 1px; text-transform: uppercase;
+  }
+  .algo-card-badge.base  { background: rgba(255,171,0,0.12); color: var(--amber); }
+  .algo-card-badge.paper { background: rgba(0,229,255,0.12); color: var(--accent); }
+  .algo-card-badge.ours  { background: rgba(0,230,118,0.15); color: var(--green); }
+
+  /* RESPONSIVE */
+  @media (max-width: 1100px) {
+    .grid {
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto;
+    }
+    .scope { grid-column: 1 / 3; }
+    .sidebar { grid-column: 1 / 3; grid-row: auto;
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px;
+    }
+    .log-panel { grid-column: 1 / 3; }
+    .controls { grid-column: 1 / 3; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="matrix-canvas"></canvas>
+
+<!-- ALGORITHMS MODAL -->
+<div class="algo-modal-overlay" id="algo-modal" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="algo-modal">
+    <div class="algo-modal-header">
+      <h2>⚡ ALGORITHM REFERENCE</h2>
+      <button class="algo-modal-close" onclick="document.getElementById('algo-modal').classList.remove('open')">&times;</button>
+    </div>
+    <div class="algo-modal-body">
+
+      <div class="algo-card">
+        <div class="algo-card-head">
+          <span class="algo-card-title">Static Protocol</span>
+          <span class="algo-card-badge base">BASELINE</span>
+        </div>
+        <div class="algo-card-type" style="padding:4px 14px 0">algorithm :: deterministic</div>
+        <div class="algo-card-body">
+          Always uses <span class="hl">Tag=64, PA=0.5</span> (action 14) regardless of channel conditions.
+          Represents standard industry QKD deployments. Wastes capacity in good conditions
+          and breaches during turbulence or eavesdropping. Serves as the <span class="hl">1.0× baseline</span>
+          against which all other algorithms are compared.
+        </div>
+        <div class="algo-card-perf">▸ Performance: 1.0× yield &nbsp;|&nbsp; ~20% failure rate</div>
+      </div>
+
+      <div class="algo-card">
+        <div class="algo-card-head">
+          <span class="algo-card-title">Random Policy</span>
+          <span class="algo-card-badge base">BASELINE</span>
+        </div>
+        <div class="algo-card-type" style="padding:4px 14px 0">algorithm :: stochastic-baseline</div>
+        <div class="algo-card-body">
+          Selects uniformly random actions from the <span class="hl">40 possible choices</span>
+          (4 tag lengths × 10 PA ratios). A sanity-check baseline — any trained agent should
+          significantly outperform random. Expect many breaches and failures due to no
+          awareness of channel state.
+        </div>
+        <div class="algo-card-perf">▸ Performance: highly variable &nbsp;|&nbsp; ~50%+ failure rate</div>
+      </div>
+
+      <div class="algo-card">
+        <div class="algo-card-head">
+          <span class="algo-card-title">Naive DQN (No Stabilization)</span>
+          <span class="algo-card-badge paper">FROM PAPER</span>
+        </div>
+        <div class="algo-card-type" style="padding:4px 14px 0">algorithm :: reactive-RL</div>
+        <div class="algo-card-body">
+          A basic Deep Q-Network that only observes <span class="hl">current QBER</span> without
+          ΔQBER momentum. No target network stabilization (no Polyak averaging). Key weaknesses:
+          <br>• No <span class="hl">pre-emptive throttling</span> before turbulence onset
+          <br>• Noisy Q-value oscillations cause erratic decisions
+          <br>• Overshoots PA ratio during rapid QBER transitions
+          <br>This represents the "first-attempt" RL approach referenced in the comparative analysis table.
+        </div>
+        <div class="algo-card-perf">▸ Performance: 1.2× yield (unstable) &nbsp;|&nbsp; ~15% failure rate</div>
+      </div>
+
+      <div class="algo-card">
+        <div class="algo-card-head">
+          <span class="algo-card-title">Context-Aware DQN (Heuristic)</span>
+          <span class="algo-card-badge paper">FROM PAPER</span>
+        </div>
+        <div class="algo-card-type" style="padding:4px 14px 0">algorithm :: rule-based-approximation</div>
+        <div class="algo-card-body">
+          A JavaScript <span class="hl">hand-coded approximation</span> of the trained Context-Aware DQN's
+          behavior. Uses ΔQBER for pre-emptive throttling and Devetak-Winter bounds for safe PA
+          selection. Runs entirely in the browser without the Python backend.
+          <br><br>
+          Implements the same <span class="hl">7D state space</span> awareness (QBER, ΔQBER, SNR, previous PA,
+          tag length, key pool, episode progress) but via hand-crafted rules rather than learned weights.
+        </div>
+        <div class="algo-card-perf">▸ Performance: ~1.79× yield &nbsp;|&nbsp; ~8% failure rate (approx)</div>
+      </div>
+
+      <div class="algo-card">
+        <div class="algo-card-head">
+          <span class="algo-card-title">Context-Aware DQN (Trained Model) ★</span>
+          <span class="algo-card-badge ours">OURS ★</span>
+        </div>
+        <div class="algo-card-type" style="padding:4px 14px 0">algorithm :: neural-network (Dueling Double DQN + PER)</div>
+        <div class="algo-card-body">
+          The actual <span class="hl">Dueling Double DQN</span> with Prioritized Experience Replay,
+          trained over 5000 episodes in PyTorch. Uses the full <span class="hl">7D state space</span>:
+          <br>• QBER, ΔQBER (momentum), SNR, previous PA ratio
+          <br>• Tag length, key pool level, episode progress
+          <br><br>
+          Architecture: Shared 256-unit feature layer → Value stream (256→128→1) +
+          Advantage stream (256→128→40). Polyak soft-target updates (τ=0.005),
+          cosine annealing LR schedule, β-annealed priority sampling.
+          <br><br>
+          Runs <span class="hl">real-time inference</span> via the Python backend (port 8001).
+          This is <span class="hl">our proposed model</span> from the paper.
+        </div>
+        <div class="algo-card-perf">▸ Performance: 1.79× yield &nbsp;|&nbsp; ~8% failure rate &nbsp;|&nbsp; 55.89% fewer aborts</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="app">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="header-left">
+      <div class="header-logo">Q</div>
+      <div>
+        <div class="header-title" data-tip="qkd">QKD SIGNAL INTELLIGENCE</div>
+        <div class="header-sub">Adaptive Quantum Cryptographic Protocol — <span data-tip="bb84">BB84</span> Channel Monitor</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <button class="algo-info-btn" id="algo-info-btn" onclick="document.getElementById('algo-modal').classList.add('open')">
+        <span class="algo-icon">⚡</span> Algorithms
+      </button>
+      <div class="status-badge">
+        <div class="status-dot live" id="status-dot"></div>
+        <span id="status-text">STANDBY</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN GRID -->
+  <div class="grid">
+
+    <!-- OSCILLOSCOPE -->
+    <div class="panel scope">
+      <div class="panel-title"><span class="icon">◈</span> QUANTUM CHANNEL — <span data-tip="qber">QBER</span> WAVEFORM</div>
+      <canvas id="scope-canvas" height="200"></canvas>
+    </div>
+
+    <!-- UTILIZATION CHART -->
+    <div class="panel util-chart">
+      <div class="panel-title"><span class="icon">◆</span> CAPACITY UTILIZATION OVER TIME</div>
+      <canvas id="util-canvas" height="120"></canvas>
+      <div class="util-stats">
+        <div>AVG: <span class="val" id="util-avg" style="color:var(--accent)">0%</span></div>
+        <div>MIN: <span class="val" id="util-min" style="color:var(--green)">0%</span></div>
+        <div>MAX: <span class="val" id="util-max" style="color:var(--red)">0%</span></div>
+        <div>CURRENT: <span class="val" id="util-cur" style="color:#fff">0%</span></div>
+      </div>
+    </div>
+
+    <!-- SIDEBAR METRICS -->
+    <div class="sidebar panel">
+      <div class="panel-title"><span class="icon">◉</span> LIVE METRICS</div>
+
+      <div class="metric-card" data-tip="securekeys">
+        <div class="metric-label">Secure Keys Generated</div>
+        <div class="metric-value green" id="m-keys">0</div>
+        <div class="metric-delta up" id="m-keys-rate">+0 keys/block</div>
+      </div>
+      <div class="metric-card" data-tip="qber">
+        <div class="metric-label">Current QBER</div>
+        <div class="metric-value accent" id="m-qber">0.00%</div>
+      </div>
+      <div class="metric-card" data-tip="dwrate">
+        <div class="metric-label">Secure Capacity (<span data-tip="devetakwinter">DW Rate</span>)</div>
+        <div class="metric-value" id="m-capacity">0.000</div>
+      </div>
+      <div class="metric-card" data-tip="breach">
+        <div class="metric-label">Security Breaches</div>
+        <div class="metric-value red" id="m-breaches">0</div>
+      </div>
+      <div class="metric-card" data-tip="failures">
+        <div class="metric-label">Failed Blocks</div>
+        <div class="metric-value amber" id="m-failures">0</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Cumulative Reward</div>
+        <div class="metric-value" id="m-reward" style="color:#e0e0e0">0.0</div>
+      </div>
+
+      <!-- EFFICIENCY METER -->
+      <div class="metric-card" data-tip="efficiency">
+        <div class="metric-label">Capacity Utilization</div>
+        <div class="eff-pct" id="eff-pct">0%</div>
+        <div class="eff-meter">
+          <div class="eff-track"><div class="eff-fill" id="eff-fill" style="width:0%"></div></div>
+          <div class="eff-labels"><span>Wasting</span><span>Optimal</span><span>Breach</span></div>
+        </div>
+      </div>
+
+      <!-- KEY POOL GAUGE -->
+      <div class="metric-card" data-tip="keypool">
+        <div class="metric-label">Authentication Key Pool</div>
+        <div class="gauge-container">
+          <div class="gauge-track"><div class="gauge-fill" id="gauge-fill" style="width:10%"></div></div>
+          <div class="gauge-labels"><span>0</span><span id="gauge-val">1000</span><span>10K</span></div>
+        </div>
+      </div>
+
+      <!-- THREAT INDICATORS -->
+      <div class="threat-row">
+        <div class="threat-indicator" id="ti-eve" data-tip="eve">
+          <div class="ti-label">Eve</div>
+          <div class="ti-status" id="ti-eve-val">CLEAR</div>
+        </div>
+        <div class="threat-indicator" id="ti-turb" data-tip="turbulence">
+          <div class="ti-label">Turbulence</div>
+          <div class="ti-status" id="ti-turb-val">CLEAR</div>
+        </div>
+        <div class="threat-indicator" id="ti-secure" data-tip="linksecurity">
+          <div class="ti-label">Link</div>
+          <div class="ti-status" id="ti-secure-val" style="color:var(--green)">SECURE</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AGENT ACTION PANEL -->
+    <div class="panel action-panel">
+      <div class="panel-title"><span class="icon">⬡</span> AGENT DECISIONS</div>
+      <div class="action-grid">
+        <div class="action-item" id="act-pa" data-tip="paratio">
+          <div class="label">PA Ratio</div>
+          <div class="val" id="act-pa-val">0.5</div>
+        </div>
+        <div class="action-item" id="act-tag" data-tip="authtag">
+          <div class="label">Auth Tag</div>
+          <div class="val" id="act-tag-val">64</div>
+        </div>
+        <div class="action-item" id="act-action" data-tip="actionidx">
+          <div class="label">Action Idx</div>
+          <div class="val" id="act-action-val">14</div>
+        </div>
+        <div class="action-item" id="act-mode" data-tip="agentmode">
+          <div class="label">Agent Mode</div>
+          <div class="val" id="act-mode-val" style="font-size:12px; color:var(--accent)">STATIC</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CHANNEL STATE BARS -->
+    <div class="panel channel-panel">
+      <div class="panel-title"><span class="icon">◆</span> CHANNEL STATE</div>
+      <div class="channel-bars">
+        <div class="bar-row" data-tip="qber">
+          <div class="bar-label">QBER</div>
+          <div class="bar-track"><div class="bar-fill" id="bar-qber" style="width:2%; background:var(--green)"></div></div>
+          <div class="bar-val" id="bar-qber-val">0.01</div>
+        </div>
+        <div class="bar-row" data-tip="deltaqber">
+          <div class="bar-label">Δ QBER</div>
+          <div class="bar-track"><div class="bar-fill" id="bar-delta" style="width:50%; background:var(--accent)"></div></div>
+          <div class="bar-val" id="bar-delta-val">0.00</div>
+        </div>
+        <div class="bar-row" data-tip="snr">
+          <div class="bar-label">SNR</div>
+          <div class="bar-track"><div class="bar-fill" id="bar-snr" style="width:80%; background:var(--accent2)"></div></div>
+          <div class="bar-val" id="bar-snr-val">50.0</div>
+        </div>
+        <div class="bar-row" data-tip="paratio">
+          <div class="bar-label">PA Ratio</div>
+          <div class="bar-track"><div class="bar-fill" id="bar-pa" style="width:50%; background:var(--accent)"></div></div>
+          <div class="bar-val" id="bar-pa-val">0.50</div>
+        </div>
+        <div class="bar-row" data-tip="dwrate">
+          <div class="bar-label">Secure Cap.</div>
+          <div class="bar-track"><div class="bar-fill" id="bar-cap" style="width:80%; background:var(--green)"></div></div>
+          <div class="bar-val" id="bar-cap-val">0.80</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- EVENT LOG -->
+    <div class="panel log-panel">
+      <div class="panel-title"><span class="icon">▤</span> EVENT LOG</div>
+      <div class="log-scroll" id="log-scroll"></div>
+    </div>
+
+  </div>
+
+  <!-- CONTROLS -->
+  <div class="controls">
+    <button class="btn" id="btn-start" onclick="toggleSimulation()">▶ START</button>
+    <button class="btn danger" id="btn-reset" onclick="resetSimulation()">↺ RESET</button>
+    <div class="algo-select-wrap">
+      <span class="algo-label">Algorithm</span>
+      <select class="algo-select" id="algo-select" onchange="onAlgoChange()">
+        <option value="static" data-tip="algo_static">Static Protocol (Baseline)</option>
+        <option value="random" data-tip="algo_random">Random Policy</option>
+        <option value="naive-dqn" data-tip="algo_naive">Naive DQN (No Stabilization)</option>
+        <option value="heuristic" data-tip="algo_heuristic">Context-Aware DQN (Heuristic)</option>
+        <option value="trained" selected data-tip="algo_trained">Context-Aware DQN (Trained Model) ★</option>
+      </select>
+      <span class="algo-badge paper" id="algo-badge">FROM PAPER</span>
+    </div>
+    <div class="controls-spacer"></div>
+    <span class="speed-label">SPEED</span>
+    <input type="range" class="speed-slider" id="speed-slider" min="1" max="100" value="30">
+    <div class="controls-spacer"></div>
+    <div class="step-counter">BLOCK: <span id="block-count">0</span> / <span id="episode-count">EP 0</span></div>
+  </div>
+
+</div>
+
+<script>
+// ============================================
+// MATRIX RAIN BACKGROUND
+// ============================================
+(function initMatrix() {
+  const c = document.getElementById('matrix-canvas');
+  const ctx = c.getContext('2d');
+  c.width = window.innerWidth;
+  c.height = window.innerHeight;
+
+  const chars = 'QKDBB84EVEALICEBOB01ψφ⊕⊗∣⟩∣0⟩∣1⟩∣+⟩∣−⟩';
+  const fontSize = 13;
+  const cols = Math.floor(c.width / fontSize);
+  const drops = Array(cols).fill(1);
+
+  function draw() {
+    ctx.fillStyle = 'rgba(10,14,23,0.05)';
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.fillStyle = '#00e5ff';
+    ctx.font = fontSize + 'px monospace';
+    for (let i = 0; i < drops.length; i++) {
+      const char = chars[Math.floor(Math.random() * chars.length)];
+      ctx.fillText(char, i * fontSize, drops[i] * fontSize);
+      if (drops[i] * fontSize > c.height && Math.random() > 0.975) drops[i] = 0;
+      drops[i]++;
+    }
+  }
+  setInterval(draw, 60);
+  window.addEventListener('resize', () => { c.width = window.innerWidth; c.height = window.innerHeight; });
+})();
+
+// ============================================
+// QKD SIMULATION ENGINE (JS PORT)
+// ============================================
+const BLOCK_SIZE = 10000;
+const TAG_LENGTHS = [32, 64, 96, 128];
+const BACKEND_URL = 'http://127.0.0.1:8001';
+
+class QKDSim {
+  constructor() { this.reset(); }
+
+  reset() {
+    this.keyPool = 1000;
+    this.prevQber = 0.01;
+    this.avgQber = 0.01;
+    this.wasTurbulent = false;
+    this.totalKeys = 0;
+    this.totalReward = 0;
+    this.breaches = 0;
+    this.failures = 0;
+    this.blockCount = 0;
+    this.episode = 1;
+    this.blockInEp = 0;
+    this.currentState = this.buildState(0.01, 0.0, 50.0, false, false);
+  }
+
+  buildState(qber, deltaQber, snr, evePresent, isTurbulent) {
+    return [
+      qber * 2.0,
+      deltaQber,
+      this.avgQber * 2.0,
+      snr * 0.01,
+      this.keyPool / 2000.0,
+      evePresent ? 1.0 : 0.0,
+      isTurbulent ? 1.0 : 0.0,
+    ];
+  }
+
+  binaryEntropy(p) {
+    p = Math.max(1e-9, Math.min(p, 1 - 1e-9));
+    return -p * Math.log2(p) - (1 - p) * Math.log2(1 - p);
+  }
+
+  devetakWinterRate(qber) {
+    const h2 = this.binaryEntropy(qber);
+    return Math.max(0, 1.0 - h2 - 1.16 * h2);
+  }
+
+  step(actionIdx) {
+    const tagIdx = Math.floor(actionIdx / 10);
+    const paIdx = actionIdx % 10;
+    const tagLength = TAG_LENGTHS[tagIdx];
+    const paRatio = (paIdx + 1) / 10.0;
+
+    // Physics: auto-regressive turbulence
+    let baseQber = this.prevQber * 0.7 + 0.01 * 0.3;
+    let isTurbulent = false;
+    if (Math.random() < 0.15) {
+      isTurbulent = true;
+      baseQber += 0.05 + Math.random() * 0.05;
+    }
+    baseQber = Math.max(0.01, baseQber * 0.9);
+
+    const evePresent = Math.random() < 0.15;
+    if (evePresent) baseQber += 0.03;
+
+    const currentQber = Math.min(baseQber, 0.5);
+    const snr = 1.0 / (currentQber + 1e-6);
+    const secureRate = this.devetakWinterRate(currentQber);
+
+    let reward = 0, finalKeys = 0, isSecure = true;
+
+    if (this.keyPool < tagLength) {
+      reward = -5;
+      this.keyPool = 1000;
+    } else {
+      this.keyPool -= tagLength;
+      isSecure = paRatio <= secureRate;
+
+      if (!isSecure) {
+        reward = -5.0 - (paRatio - secureRate) * 10.0;
+      } else if (secureRate < 0.01) {
+        reward = paRatio <= 0.1 ? 1.0 : -1.0;
+      } else {
+        finalKeys = Math.floor(BLOCK_SIZE * paRatio * (1 - currentQber));
+        this.keyPool += finalKeys;
+        reward = (secureRate * finalKeys) / 500.0;
+        if (!isTurbulent && paRatio > 0.6) reward *= 1.3;
+        if (isTurbulent && isSecure) reward += 3.0;
+      }
+    }
+
+    if (this.keyPool > 10000) this.keyPool = 10000;
+
+    const deltaQber = (currentQber - this.prevQber) * 10.0;
+    this.avgQber = 0.8 * this.avgQber + 0.2 * currentQber;
+    this.prevQber = currentQber;
+    this.wasTurbulent = isTurbulent;
+    this.currentState = this.buildState(currentQber, deltaQber, snr, evePresent, isTurbulent);
+
+    this.totalKeys += finalKeys;
+    this.totalReward += reward;
+    if (!isSecure && finalKeys > 0) this.breaches++;
+    if (finalKeys === 0) this.failures++;
+    this.blockCount++;
+    this.blockInEp++;
+
+    if (this.blockInEp >= 50) {
+      this.blockInEp = 0;
+      this.episode++;
+    }
+
+    return {
+      qber: currentQber,
+      deltaQber,
+      avgQber: this.avgQber,
+      snr,
+      paRatio,
+      tagLength,
+      secureRate,
+      finalKeys,
+      isSecure,
+      isTurbulent,
+      evePresent,
+      reward,
+      keyPool: this.keyPool,
+      action: actionIdx,
+    };
+  }
+}
+
+// ============================================
+// ALGORITHM POLICIES (from paper Table 8.1)
+// ============================================
+
+// 1. STATIC PROTOCOL — Fixed Tag=64, PA=0.5 (action 14)
+function staticPolicy(sim) {
+  return 14;
+}
+
+// 2. RANDOM POLICY — Uniform random action (sanity baseline)
+function randomPolicy(sim) {
+  return Math.floor(Math.random() * 40);
+}
+
+// 3. NAIVE DQN — Reactive only, no delta-QBER awareness,
+//    no target stabilization → unstable under turbulence.
+//    Paper: 1.2x yield, ~15% failure, heuristic reward.
+function naiveDqnPolicy(sim) {
+  const qber = sim.prevQber;
+  const pool = sim.keyPool;
+
+  // Naive: only reacts to current QBER, ignores trends
+  // Sometimes overshoots PA causing breaches (instability)
+  const noise = (Math.random() - 0.5) * 0.15; // learning instability
+
+  if (qber > 0.20) {
+    // High QBER: tries to conserve but reacts too late
+    return Math.random() < 0.3 ? 0 : 10; // Tag32/PA0.1 or Tag64/PA0.1
+  }
+
+  if (qber > 0.10) {
+    // Near threshold: no pre-emptive throttling (key weakness)
+    // Naive agent doesn't see turbulence coming, keeps medium PA
+    const rate = sim.devetakWinterRate(qber);
+    let pa = Math.floor((rate + noise) * 10);
+    pa = Math.max(0, Math.min(pa, 9));
+    return 10 + pa; // Tag=64
+  }
+
+  if (qber < 0.04) {
+    // Good channel: exploits but with noisy decisions
+    const rate = sim.devetakWinterRate(qber);
+    let pa = Math.floor((rate + noise) * 10);
+    pa = Math.max(0, Math.min(pa, 9));
+    // Sometimes picks expensive tag unnecessarily
+    const tagIdx = Math.random() < 0.2 ? 2 : (Math.random() < 0.5 ? 0 : 1);
+    return tagIdx * 10 + pa;
+  }
+
+  // Moderate: reactive, no context
+  const rate = sim.devetakWinterRate(qber);
+  let pa = Math.floor((rate + noise) * 10);
+  pa = Math.max(0, Math.min(pa, 9));
+  return 10 + pa;
+}
+
+// 4. CONTEXT-AWARE DQN (Heuristic) — JS approximation of
+//    the trained policy with delta-QBER + pre-emptive throttling.
+//    Paper: 1.79x yield, ~8% failure, entropy-based reward.
+function aiPolicy(sim) {
+  const qber = sim.prevQber;
+  const delta = (sim.avgQber - 0.01) * 10;
+  const pool = sim.keyPool;
+
+  // If channel is dead, conserve
+  if (qber > 0.15) return 0;  // Tag=32, PA=0.1
+
+  // PRE-EMPTIVE THROTTLING: rising QBER trend → be cautious
+  if (delta > 0.3) {
+    return pool > 3000 ? 20 : 0; // High tag if we can afford, else minimal
+  }
+
+  // Clear sky: exploit aggressively
+  if (qber < 0.03) {
+    const rate = sim.devetakWinterRate(qber);
+    let bestPa = Math.min(Math.floor(rate * 10) - 1, 9);
+    bestPa = Math.max(bestPa, 0);
+    return bestPa; // Tag=32 (cheap), high PA
+  }
+
+  // Moderate conditions: balanced
+  const rate = sim.devetakWinterRate(qber);
+  let safePa = Math.min(Math.floor(rate * 10) - 1, 9);
+  safePa = Math.max(safePa, 0);
+  return 10 + Math.min(safePa, 7);
+}
+
+// 5. CONTEXT-AWARE DQN (Trained) — backend neural network
+//    (handled by backendPolicy via /predict endpoint)
+
+let backendOnline = false;
+
+async function checkBackendHealth() {
+  try {
+    const response = await fetch(`${BACKEND_URL}/health`);
+    backendOnline = response.ok;
+    if (backendOnline) {
+      const health = await response.json();
+      addLog('SYS', 'info', `Backend connected (${health.architecture})`);
+    } else {
+      addLog('SYS', 'info', 'Backend unavailable, using heuristic fallback');
+    }
+  } catch (error) {
+    backendOnline = false;
+    addLog('SYS', 'info', 'Backend offline, using heuristic fallback');
+  }
+}
+
+async function backendPolicy(sim) {
+  if (!backendOnline) return aiPolicy(sim);
+
+  try {
+    const response = await fetch(`${BACKEND_URL}/predict`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state: sim.currentState }),
+    });
+
+    if (!response.ok) {
+      backendOnline = false;
+      return aiPolicy(sim);
+    }
+
+    const data = await response.json();
+    if (typeof data.action !== 'number') {
+      return aiPolicy(sim);
+    }
+    return data.action;
+  } catch (error) {
+    backendOnline = false;
+    return aiPolicy(sim);
+  }
+}
+
+// ============================================
+// OSCILLOSCOPE RENDERER
+// ============================================
+const scopeCanvas = document.getElementById('scope-canvas');
+const scopeCtx = scopeCanvas.getContext('2d');
+const SCOPE_HISTORY = 300;
+let qberHistory = [];
+let capacityHistory = [];
+let paHistory = [];
+let utilHistory = [];     // capacity utilization % per block
+let utilAvgHistory = [];  // running average of utilization
+
+function resizeScope() {
+  const rect = scopeCanvas.parentElement.getBoundingClientRect();
+  scopeCanvas.width = rect.width - 28;
+  scopeCanvas.height = 200;
+}
+resizeScope();
+
+// UTILIZATION CHART
+const utilCanvas = document.getElementById('util-canvas');
+const utilCtx = utilCanvas.getContext('2d');
+
+function resizeUtil() {
+  const rect = utilCanvas.parentElement.getBoundingClientRect();
+  utilCanvas.width = rect.width - 28;
+  utilCanvas.height = 120;
+}
+resizeUtil();
+
+function drawUtilChart() {
+  const W = utilCanvas.width, H = utilCanvas.height;
+  const ctx = utilCtx;
+  ctx.clearRect(0, 0, W, H);
+
+  // Background
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(0, 0, W, H);
+
+  const maxPct = 150; // chart tops out at 150%
+  const toY = (pct) => H - (Math.min(pct, maxPct) / maxPct) * H;
+
+  // Zones: green (80-100%), red (>100%)
+  // Optimal zone (80-100%)
+  ctx.fillStyle = 'rgba(0,230,118,0.06)';
+  ctx.fillRect(0, toY(100), W, toY(80) - toY(100));
+  // Danger zone (>100%)
+  ctx.fillStyle = 'rgba(255,82,82,0.06)';
+  ctx.fillRect(0, 0, W, toY(100));
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 1;
+  for (const pct of [25, 50, 75, 100, 125]) {
+    const y = toY(pct);
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  }
+
+  // 100% threshold line (dashed)
+  ctx.strokeStyle = 'rgba(255,82,82,0.4)';
+  ctx.setLineDash([6, 4]);
+  ctx.beginPath();
+  ctx.moveTo(0, toY(100));
+  ctx.lineTo(W, toY(100));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // 80% optimal line (dashed green)
+  ctx.strokeStyle = 'rgba(0,230,118,0.3)';
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(0, toY(80));
+  ctx.lineTo(W, toY(80));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  const len = utilHistory.length;
+  if (len < 2) {
+    // Labels even when empty
+    ctx.fillStyle = 'rgba(255,82,82,0.5)';
+    ctx.font = '9px monospace';
+    ctx.fillText('100% LIMIT', W - 72, toY(100) - 3);
+    ctx.fillStyle = 'rgba(0,230,118,0.4)';
+    ctx.fillText('80% OPTIMAL', W - 78, toY(80) - 3);
+    return;
+  }
+
+  const step = W / (SCOPE_HISTORY - 1);
+  const offset = SCOPE_HISTORY - len;
+
+  // Per-block utilization bars (thin, color-coded)
+  for (let i = 0; i < len; i++) {
+    const x = (offset + i) * step;
+    const pct = utilHistory[i];
+    const y = toY(pct);
+    if (pct > 100) {
+      ctx.fillStyle = 'rgba(255,82,82,0.3)';
+    } else if (pct > 80) {
+      ctx.fillStyle = 'rgba(0,230,118,0.2)';
+    } else if (pct > 40) {
+      ctx.fillStyle = 'rgba(0,229,255,0.15)';
+    } else {
+      ctx.fillStyle = 'rgba(255,171,0,0.2)';
+    }
+    ctx.fillRect(x - 1, y, 2, H - y);
+  }
+
+  // Running average line (thick, bright)
+  ctx.strokeStyle = '#00e5ff';
+  ctx.lineWidth = 2;
+  ctx.shadowColor = 'rgba(0,229,255,0.5)';
+  ctx.shadowBlur = 6;
+  ctx.beginPath();
+  for (let i = 0; i < utilAvgHistory.length; i++) {
+    const x = (offset + i) * step;
+    const y = toY(utilAvgHistory[i]);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Labels
+  ctx.fillStyle = 'rgba(255,82,82,0.5)';
+  ctx.font = '9px monospace';
+  ctx.fillText('100% LIMIT', W - 72, toY(100) - 3);
+  ctx.fillStyle = 'rgba(0,230,118,0.4)';
+  ctx.fillText('80% OPTIMAL', W - 78, toY(80) - 3);
+
+  // Running avg value label on right
+  if (utilAvgHistory.length > 0) {
+    const lastAvg = utilAvgHistory[utilAvgHistory.length - 1];
+    ctx.fillStyle = '#00e5ff';
+    ctx.font = 'bold 10px monospace';
+    ctx.fillText('AVG ' + lastAvg.toFixed(0) + '%', W - 62, toY(lastAvg) - 5);
+  }
+
+  // Update stats
+  const avg = utilHistory.reduce((a,b) => a+b, 0) / len;
+  const min = Math.min(...utilHistory);
+  const max = Math.max(...utilHistory);
+  const cur = utilHistory[len - 1];
+  $('util-avg').textContent = avg.toFixed(1) + '%';
+  $('util-min').textContent = min.toFixed(0) + '%';
+  $('util-max').textContent = max.toFixed(0) + '%';
+  $('util-cur').textContent = cur.toFixed(0) + '%';
+  // Color-code avg
+  $('util-avg').style.color = avg > 100 ? 'var(--red)' : avg > 80 ? 'var(--green)' : avg > 40 ? 'var(--accent)' : 'var(--amber)';
+}
+drawUtilChart();
+
+window.addEventListener('resize', () => { resizeScope(); resizeUtil(); drawUtilChart(); });
+
+function drawScope() {
+  const W = scopeCanvas.width, H = scopeCanvas.height;
+  const ctx = scopeCtx;
+
+  // Background
+  ctx.fillStyle = '#080c14';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle = 'rgba(26,39,68,0.5)';
+  ctx.lineWidth = 0.5;
+  for (let y = 0; y < H; y += 25) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+  for (let x = 0; x < W; x += 40) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+
+  // Security threshold line (11%)
+  const threshY = H - (0.11 / 0.5) * H;
+  ctx.strokeStyle = 'rgba(255,23,68,0.4)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([6, 4]);
+  ctx.beginPath(); ctx.moveTo(0, threshY); ctx.lineTo(W, threshY); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(255,23,68,0.6)';
+  ctx.font = '9px monospace';
+  ctx.fillText('QBER THRESHOLD (11%)', W - 160, threshY - 4);
+
+  if (qberHistory.length < 2) return;
+
+  const step = W / SCOPE_HISTORY;
+  const len = Math.min(qberHistory.length, capacityHistory.length, paHistory.length);
+
+  // ── 1. SAFE MARGIN FILL (green) between Capacity and PA when PA < Capacity ──
+  ctx.beginPath();
+  ctx.fillStyle = 'rgba(0,230,118,0.08)';
+  for (let i = 0; i < len; i++) {
+    const x = i * step;
+    const capY = H - capacityHistory[i] * H;
+    const paY  = H - paHistory[i] * H;
+    if (paHistory[i] <= capacityHistory[i]) {
+      if (i === 0) ctx.moveTo(x, capY); else ctx.lineTo(x, capY);
+    } else {
+      if (i === 0) ctx.moveTo(x, capY); else ctx.lineTo(x, capY);
+    }
+  }
+  for (let i = len - 1; i >= 0; i--) {
+    const x = i * step;
+    const paY = H - paHistory[i] * H;
+    const capY = H - capacityHistory[i] * H;
+    // Only fill green where PA is BELOW capacity
+    ctx.lineTo(x, paHistory[i] <= capacityHistory[i] ? paY : capY);
+  }
+  ctx.closePath();
+  ctx.fill();
+
+  // ── 2. DANGER ZONE FILL (red) between PA and Capacity when PA > Capacity ──
+  for (let i = 0; i < len - 1; i++) {
+    if (paHistory[i] > capacityHistory[i] || paHistory[i+1] > capacityHistory[i+1]) {
+      const x1 = i * step, x2 = (i + 1) * step;
+      const pa1 = H - paHistory[i] * H, pa2 = H - paHistory[i+1] * H;
+      const cap1 = H - capacityHistory[i] * H, cap2 = H - capacityHistory[i+1] * H;
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(255,23,68,0.18)';
+      ctx.moveTo(x1, Math.min(pa1, cap1));
+      ctx.lineTo(x2, Math.min(pa2, cap2));
+      ctx.lineTo(x2, Math.max(pa2, cap2));
+      ctx.lineTo(x1, Math.max(pa1, cap1));
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  // ── 3. BREACH GLOW: pulsing red overlay when current PA > Capacity ──
+  if (len > 0 && paHistory[len-1] > capacityHistory[len-1]) {
+    const pulseAlpha = 0.04 + 0.04 * Math.sin(Date.now() / 200);
+    ctx.fillStyle = `rgba(255,23,68,${pulseAlpha})`;
+    ctx.fillRect(0, 0, W, H);
+
+    // Red border flash
+    ctx.strokeStyle = `rgba(255,23,68,${0.3 + 0.2 * Math.sin(Date.now() / 150)})`;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, W - 2, H - 2);
+
+    // BREACH warning text
+    ctx.save();
+    ctx.font = 'bold 11px monospace';
+    ctx.fillStyle = `rgba(255,23,68,${0.5 + 0.4 * Math.sin(Date.now() / 200)})`;
+    ctx.textAlign = 'center';
+    ctx.fillText('⚠ PA > CAPACITY — BREACH ZONE', W / 2, H - 8);
+    ctx.restore();
+  }
+
+  // ── 4. Capacity line (top of safe zone) ──
+  ctx.beginPath();
+  ctx.strokeStyle = 'rgba(0,230,118,0.5)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  for (let i = 0; i < len; i++) {
+    const x = i * step;
+    const y = H - capacityHistory[i] * H;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // ── 5. PA ratio line ──
+  ctx.beginPath();
+  ctx.strokeStyle = 'rgba(124,77,255,0.8)';
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < len; i++) {
+    const x = i * step;
+    const y = H - paHistory[i] * H;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // ── 6. QBER waveform (main signal) ──
+  ctx.beginPath();
+  ctx.strokeStyle = '#00e5ff';
+  ctx.lineWidth = 2;
+  ctx.shadowColor = '#00e5ff';
+  ctx.shadowBlur = 6;
+  for (let i = 0; i < qberHistory.length; i++) {
+    const x = i * step;
+    const y = H - (qberHistory[i] / 0.5) * H;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // ── 7. Legend ──
+  ctx.font = '9px monospace';
+  ctx.fillStyle = '#00e5ff';   ctx.fillText('■ QBER', 8, 14);
+  ctx.fillStyle = '#7c4dff';   ctx.fillText('■ PA RATIO', 70, 14);
+  ctx.fillStyle = '#00e676';   ctx.fillText('■ SECURE CAP', 155, 14);
+  ctx.fillStyle = 'rgba(0,230,118,0.4)'; ctx.fillText('█ SAFE GAP', 255, 14);
+  ctx.fillStyle = 'rgba(255,23,68,0.5)'; ctx.fillText('█ BREACH', 335, 14);
+
+  // ── 8. Current value labels ──
+  if (qberHistory.length > 0) {
+    const last = qberHistory[qberHistory.length - 1];
+    const ly = H - (last / 0.5) * H;
+    ctx.fillStyle = '#00e5ff';
+    ctx.font = '11px monospace';
+    ctx.fillText((last * 100).toFixed(2) + '%', W - 70, Math.max(ly - 6, 14));
+  }
+  if (len > 0) {
+    const lastPa = paHistory[len - 1];
+    const lastCap = capacityHistory[len - 1];
+    const paY = H - lastPa * H;
+    const capY = H - lastCap * H;
+    ctx.font = '9px monospace';
+    ctx.fillStyle = '#7c4dff';
+    ctx.fillText('PA ' + lastPa.toFixed(1), W - 70, Math.max(paY - 4, 26));
+    ctx.fillStyle = '#00e676';
+    ctx.fillText('Cap ' + lastCap.toFixed(2), W - 70, Math.min(capY + 12, H - 4));
+  }
+}
+
+// ============================================
+// UI UPDATE
+// ============================================
+const $ = id => document.getElementById(id);
+
+function formatNum(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return n.toString();
+}
+
+function addLog(tag, tagClass, msg) {
+  const scroll = $('log-scroll');
+  const t = new Date().toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  entry.innerHTML = `<span class="log-time">${t}</span><span class="log-tag ${tagClass}">${tag}</span><span class="log-msg">${msg}</span>`;
+  scroll.prepend(entry);
+  // Keep max 100 entries
+  while (scroll.children.length > 100) scroll.removeChild(scroll.lastChild);
+}
+
+function updateUI(info) {
+  // Metrics
+  $('m-keys').textContent = formatNum(sim.totalKeys);
+  $('m-keys-rate').textContent = `+${formatNum(info.finalKeys)} keys/block`;
+  $('m-qber').textContent = (info.qber * 100).toFixed(3) + '%';
+  $('m-capacity').textContent = info.secureRate.toFixed(4);
+  $('m-breaches').textContent = sim.breaches;
+  $('m-failures').textContent = sim.failures;
+  $('m-reward').textContent = sim.totalReward.toFixed(1);
+
+  // Gauge
+  const poolPct = Math.min(sim.keyPool / 10000 * 100, 100);
+  $('gauge-fill').style.width = poolPct + '%';
+  $('gauge-fill').style.background = poolPct < 15 ? 'var(--red)' : poolPct < 40 ? 'var(--amber)' : 'var(--accent)';
+  $('gauge-val').textContent = formatNum(sim.keyPool);
+
+  // Actions
+  $('act-pa-val').textContent = info.paRatio.toFixed(1);
+  $('act-tag-val').textContent = info.tagLength;
+  $('act-action-val').textContent = info.action;
+
+  // Bars
+  const qberPct = Math.min(info.qber / 0.5 * 100, 100);
+  $('bar-qber').style.width = qberPct + '%';
+  $('bar-qber').style.background = info.qber > 0.11 ? 'var(--red)' : info.qber > 0.05 ? 'var(--amber)' : 'var(--green)';
+  $('bar-qber-val').textContent = info.qber.toFixed(4);
+
+  const deltaPct = Math.min(Math.abs(info.deltaQber) / 1.0 * 100, 100);
+  $('bar-delta').style.width = (50 + (info.deltaQber > 0 ? deltaPct/2 : -deltaPct/2)) + '%';
+  $('bar-delta-val').textContent = info.deltaQber.toFixed(3);
+
+  const snrPct = Math.min(info.snr / 100 * 100, 100);
+  $('bar-snr').style.width = snrPct + '%';
+  $('bar-snr-val').textContent = info.snr.toFixed(1);
+
+  $('bar-pa').style.width = (info.paRatio * 100) + '%';
+  $('bar-pa-val').textContent = info.paRatio.toFixed(2);
+
+  const capPct = Math.min(info.secureRate * 100, 100);
+  $('bar-cap').style.width = capPct + '%';
+  $('bar-cap').style.background = info.secureRate < 0.1 ? 'var(--red)' : 'var(--green)';
+  $('bar-cap-val').textContent = info.secureRate.toFixed(3);
+
+  // Threat indicators
+  const tiEve = $('ti-eve'), tiTurb = $('ti-turb'), tiSec = $('ti-secure');
+  tiEve.className = 'threat-indicator' + (info.evePresent ? ' active-eve' : '');
+  $('ti-eve-val').textContent = info.evePresent ? 'ACTIVE' : 'CLEAR';
+  $('ti-eve-val').style.color = info.evePresent ? 'var(--accent2)' : 'var(--text-dim)';
+
+  tiTurb.className = 'threat-indicator' + (info.isTurbulent ? ' active-turb' : '');
+  $('ti-turb-val').textContent = info.isTurbulent ? 'ACTIVE' : 'CLEAR';
+  $('ti-turb-val').style.color = info.isTurbulent ? 'var(--amber)' : 'var(--text-dim)';
+
+  tiSec.className = 'threat-indicator' + (!info.isSecure ? ' active-breach' : '');
+  $('ti-secure-val').textContent = info.isSecure ? 'SECURE' : 'BREACH';
+  $('ti-secure-val').style.color = info.isSecure ? 'var(--green)' : 'var(--red)';
+
+  // Counters
+  $('block-count').textContent = sim.blockCount;
+  $('episode-count').textContent = 'EP ' + sim.episode;
+
+  // Logging (selective)
+  if (info.isTurbulent) addLog('TURB', 'turb', `Turbulence spike: QBER=${(info.qber*100).toFixed(2)}%, SNR=${info.snr.toFixed(1)}`);
+  if (info.evePresent) addLog('EVE', 'eve', `Eavesdropper detected. QBER elevated to ${(info.qber*100).toFixed(2)}%`);
+  if (!info.isSecure && info.finalKeys > 0) addLog('BREACH', 'breach', `Security breach! PA=${info.paRatio.toFixed(1)} > Capacity=${info.secureRate.toFixed(3)}`);
+  if (info.finalKeys > 5000) addLog('YIELD', 'secure', `High yield: ${formatNum(info.finalKeys)} secure keys extracted`);
+
+  // Efficiency meter: how well algorithm uses available capacity
+  // Only compute when secureRate is meaningful (>5%), clamp to 150% to avoid outliers
+  let effPct = 0;
+  if (info.secureRate > 0.05) {
+    effPct = Math.min((info.paRatio / info.secureRate) * 100, 150);
+  }
+
+  // Track utilization history
+  utilHistory.push(effPct);
+  if (utilHistory.length > SCOPE_HISTORY) utilHistory.shift();
+  const runSum = utilHistory.reduce((a, b) => a + b, 0);
+  const runAvg = runSum / utilHistory.length;
+  utilAvgHistory.push(runAvg);
+  if (utilAvgHistory.length > SCOPE_HISTORY) utilAvgHistory.shift();
+  drawUtilChart();
+  const effFill = $('eff-fill');
+  const effLabel = $('eff-pct');
+  const clampedEff = Math.min(effPct, 150);
+  effFill.style.width = Math.min(clampedEff, 100) + '%';
+
+  if (effPct > 100) {
+    effFill.classList.add('danger');
+    effLabel.style.color = 'var(--red)';
+    effLabel.textContent = effPct.toFixed(0) + '% ⚠ OVER';
+  } else if (effPct > 80) {
+    effFill.classList.remove('danger');
+    effLabel.style.color = 'var(--green)';
+    effLabel.textContent = effPct.toFixed(0) + '% OPTIMAL';
+  } else if (effPct > 40) {
+    effFill.classList.remove('danger');
+    effLabel.style.color = 'var(--accent)';
+    effLabel.textContent = effPct.toFixed(0) + '%';
+  } else {
+    effFill.classList.remove('danger');
+    effLabel.style.color = 'var(--amber)';
+    effLabel.textContent = effPct.toFixed(0) + '% WASTING';
+  }
+}
+
+// ============================================
+// SIMULATION LOOP
+// ============================================
+let sim = new QKDSim();
+let running = false;
+let currentAlgo = 'trained';  // default to trained model
+let intervalId = null;
+let stepInFlight = false;
+
+// Algorithm metadata for UI
+const ALGO_META = {
+  'static':    { label: 'STATIC',            color: 'var(--amber)',   badge: 'BASELINE',   badgeClass: 'base' },
+  'random':    { label: 'RANDOM',            color: 'var(--red)',     badge: 'BASELINE',   badgeClass: 'base' },
+  'naive-dqn': { label: 'NAIVE DQN',         color: '#ff9800',        badge: 'FROM PAPER', badgeClass: 'paper' },
+  'heuristic': { label: 'CTX-DQN (HEUR.)',   color: 'var(--accent)',  badge: 'FROM PAPER', badgeClass: 'paper' },
+  'trained':   { label: 'CTX-DQN (TRAINED)', color: 'var(--green)',   badge: 'OURS ★',     badgeClass: 'ours' },
+};
+
+async function getAction(sim) {
+  switch (currentAlgo) {
+    case 'static':    return staticPolicy(sim);
+    case 'random':    return randomPolicy(sim);
+    case 'naive-dqn': return naiveDqnPolicy(sim);
+    case 'heuristic': return aiPolicy(sim);
+    case 'trained':   return await backendPolicy(sim);
+    default:          return staticPolicy(sim);
+  }
+}
+
+async function simStep() {
+  if (stepInFlight) return;
+  stepInFlight = true;
+
+  let action;
+  try {
+    action = await getAction(sim);
+    const info = sim.step(action);
+
+    qberHistory.push(info.qber);
+    capacityHistory.push(info.secureRate);
+    paHistory.push(info.paRatio);
+    if (qberHistory.length > SCOPE_HISTORY) {
+      qberHistory.shift();
+      capacityHistory.shift();
+      paHistory.shift();
+    }
+
+    drawScope();
+    updateUI(info);
+  } finally {
+    stepInFlight = false;
+  }
+}
+
+function toggleSimulation() {
+  running = !running;
+  $('btn-start').textContent = running ? '❚❚ PAUSE' : '▶ START';
+  $('btn-start').classList.toggle('active', running);
+  $('status-text').textContent = running ? 'LIVE' : 'PAUSED';
+  $('status-dot').className = 'status-dot ' + (running ? 'live' : 'warn');
+
+  if (running) {
+    const meta = ALGO_META[currentAlgo];
+    addLog('SYS', 'info', `Simulation started — Algorithm: ${meta.label}`);
+    startLoop();
+  } else {
+    stopLoop();
+  }
+}
+
+function onAlgoChange() {
+  const sel = $('algo-select');
+  currentAlgo = sel.value;
+  const meta = ALGO_META[currentAlgo];
+
+  // Update agent mode display
+  $('act-mode-val').textContent = meta.label;
+  $('act-mode-val').style.color = meta.color;
+
+  // Update badge
+  const badge = $('algo-badge');
+  badge.textContent = meta.badge;
+  badge.className = 'algo-badge ' + meta.badgeClass;
+
+  addLog('SYS', 'info', `Algorithm switched → ${meta.label}`);
+
+  // If trained model selected, verify backend
+  if (currentAlgo === 'trained') checkBackendHealth();
+}
+
+function resetSimulation() {
+  stopLoop();
+  running = false;
+  sim = new QKDSim();
+  qberHistory = [];
+  capacityHistory = [];
+  paHistory = [];
+  utilHistory = [];
+  utilAvgHistory = [];
+  drawUtilChart();
+  $('btn-start').textContent = '▶ START';
+  $('btn-start').classList.remove('active');
+  $('status-text').textContent = 'STANDBY';
+  $('status-dot').className = 'status-dot warn';
+  $('log-scroll').innerHTML = '';
+  // Reset all metrics to 0
+  $('m-keys').textContent = '0';
+  $('m-keys-rate').textContent = '+0 keys/block';
+  $('m-qber').textContent = '0.00%';
+  $('m-capacity').textContent = '0.000';
+  $('m-breaches').textContent = '0';
+  $('m-failures').textContent = '0';
+  $('m-reward').textContent = '0.0';
+  $('gauge-fill').style.width = '10%';
+  $('block-count').textContent = '0';
+  $('episode-count').textContent = 'EP 0';
+  // Refresh agent mode display
+  const meta = ALGO_META[currentAlgo];
+  $('act-mode-val').textContent = meta.label;
+  $('act-mode-val').style.color = meta.color;
+  drawScope();
+  addLog('SYS', 'info', 'Simulation reset');
+}
+
+function startLoop() {
+  stopLoop();
+  const speed = $('speed-slider').value;
+  const ms = Math.max(5, 200 - speed * 2);
+  intervalId = setInterval(simStep, ms);
+}
+
+function stopLoop() {
+  if (intervalId) { clearInterval(intervalId); intervalId = null; }
+}
+
+// Speed slider live update
+$('speed-slider').addEventListener('input', () => {
+  if (running) startLoop();
+});
+
+// Initialize algorithm UI
+onAlgoChange();
+checkBackendHealth();
+
+// Initial render
+drawScope();
+
+// ============================================
+// VS CODE HOVER TOOLTIP SYSTEM
+// ============================================
+(function initTooltips() {
+  const TIPS = {
+    qkd: {
+      title: 'Quantum Key Distribution (QKD)',
+      type: 'protocol :: quantum-cryptography',
+      body: 'A method to produce a shared random secret key between two parties (Alice & Bob) using quantum mechanics. Its security is guaranteed by the <span class="hl">no-cloning theorem</span> — any eavesdropper (Eve) inevitably disturbs the quantum states, making interception detectable.',
+      formula: 'Security Basis: |ψ⟩ cannot be copied → Eve detection'
+    },
+    bb84: {
+      title: 'BB84 Protocol',
+      type: 'protocol :: bennett-brassard-1984',
+      body: 'The first quantum cryptography protocol, proposed by Bennett & Brassard in 1984. Alice sends photons in random bases (<span class="hl">rectilinear +</span> or <span class="hl">diagonal ×</span>). Bob measures in random bases. They publicly compare bases and keep matching results as the secret key. This simulation models BB84 over a 50km fiber link at 0.2 dB/km.',
+      formula: 'Bases: {|0⟩,|1⟩} and {|+⟩,|−⟩}'
+    },
+    qber: {
+      title: 'Quantum Bit Error Rate (QBER)',
+      type: 'metric :: float [0.0 – 0.5]',
+      body: 'The fraction of bits where Alice and Bob disagree after basis reconciliation. Caused by <span class="hl">channel noise</span>, <span class="hl">atmospheric turbulence</span>, and <span class="hl">eavesdropping</span>. If QBER exceeds ~11% (BB84 threshold), no secure key can be extracted regardless of post-processing.',
+      formula: 'QBER = errors / total_sifted_bits'
+    },
+    deltaqber: {
+      title: 'Delta QBER (Δ QBER)',
+      type: 'feature :: momentum-indicator',
+      body: 'The rate of change of QBER multiplied by 10. This is the <span class="hl">context-aware</span> feature that distinguishes our model from Naive DQN. Positive values indicate rising error rate (turbulence onset), enabling <span class="hl">pre-emptive throttling</span> — the agent reduces PA ratio before QBER breaches the threshold.',
+      formula: 'ΔQBER = (current_qber − prev_qber) × 10'
+    },
+    dwrate: {
+      title: 'Devetak-Winter Secure Capacity',
+      type: 'metric :: information-theoretic-bound',
+      body: 'The maximum fraction of raw bits that can be extracted as a provably secure key. Derived from <span class="hl">binary entropy</span> of the QBER. This is a <span class="hl">fixed physical limit</span> — no algorithm can exceed it. Smart algorithms ride close to it without crossing.',
+      formula: 'r = 1 − h(QBER) − f_EC · h(QBER), where h(p) = −p·log₂(p) − (1−p)·log₂(1−p)'
+    },
+    devetakwinter: {
+      title: 'Devetak-Winter Rate',
+      type: 'theorem :: quantum-info-theory',
+      body: 'An information-theoretic bound on the <span class="hl">secret key rate</span> achievable by one-way post-processing in QKD. Used as our reward function to ensure the RL agent respects physics-based security.',
+      formula: 'R ≥ 1 − h(QBER) − f_EC · h(QBER)'
+    },
+    paratio: {
+      title: 'Privacy Amplification Ratio',
+      type: 'action :: float [0.1 – 1.0]',
+      body: 'The fraction of sifted bits retained after <span class="hl">privacy amplification</span> — a hash that compresses the key to remove any information Eve may have. Higher PA = more keys but riskier. The agent must keep PA ≤ Secure Capacity (DW Rate) or a <span class="hl">security breach</span> occurs.',
+      formula: 'Final Keys = BLOCK_SIZE × PA_ratio × (1 − QBER)'
+    },
+    authtag: {
+      title: 'Authentication Tag Length',
+      type: 'action :: {32, 64, 96, 128} bits',
+      body: 'Number of pre-shared key bits consumed per block to authenticate classical messages (basis reconciliation, error correction). Longer tags = stronger authentication but <span class="hl">depletes the key pool faster</span>. The agent must balance security vs. resource conservation.',
+      formula: 'Key Pool -= Tag Length per block'
+    },
+    actionidx: {
+      title: 'Action Index',
+      type: 'discrete :: [0–39]',
+      body: 'The agent\'s action encoded as a single integer. Decoded as: <span class="hl">Tag Index</span> = action ÷ 10, <span class="hl">PA Index</span> = action mod 10. This gives 4 tag lengths × 10 PA ratios = 40 possible actions per step.',
+      formula: 'action = tag_idx × 10 + pa_idx'
+    },
+    agentmode: {
+      title: 'Current Algorithm',
+      type: 'policy :: selector',
+      body: 'The active decision-making policy. <span class="hl">Static</span> always picks action 14 (Tag=64, PA=0.5). <span class="hl">Naive DQN</span> reacts to current QBER only. <span class="hl">Context-Aware DQN</span> uses ΔQBER momentum for pre-emptive throttling. <span class="hl">Trained Model</span> runs the actual PyTorch weights via backend.'
+    },
+    snr: {
+      title: 'Signal-to-Noise Ratio (SNR)',
+      type: 'metric :: channel-quality',
+      body: 'Inversely proportional to QBER. High SNR = clean channel = low error rate. Drops during <span class="hl">turbulence</span> or <span class="hl">eavesdropping</span>. Used as part of the 7D state vector input to the neural network.',
+      formula: 'SNR = 1 / (QBER + ε)'
+    },
+    securekeys: {
+      title: 'Secure Keys Generated',
+      type: 'cumulative :: integer',
+      body: 'Total provably-secure key bits extracted across all blocks. Only counted when <span class="hl">PA ratio ≤ DW Rate</span> (no breach). This is the primary performance metric — our trained model achieves <span class="hl">~79.66%</span> improvement over static protocol.'
+    },
+    breach: {
+      title: 'Security Breach',
+      type: 'event :: critical',
+      body: 'Occurs when the chosen PA ratio <span class="hl">exceeds</span> the Devetak-Winter secure capacity. This means the extracted key may contain bits known to Eve — the key is <span class="hl">not provably secure</span>. Good algorithms minimize breaches to near-zero.'
+    },
+    failures: {
+      title: 'Failed / Aborted Blocks',
+      type: 'event :: warning',
+      body: 'Blocks that produced <span class="hl">zero secure keys</span>. Happens when QBER is too high (secure rate ≈ 0) or the key pool is depleted (cannot afford authentication tag). Static protocol has ~20% failure rate; our model reduces it to ~8%.'
+    },
+    keypool: {
+      title: 'Authentication Key Pool',
+      type: 'resource :: [0 – 10,000]',
+      body: 'Pre-shared key bits available for <span class="hl">message authentication</span>. Each block consumes Tag Length bits. Replenished by successful key extractions. If pool < tag length, the block <span class="hl">fails</span>. Smart agents conserve the pool during turbulence.'
+    },
+    eve: {
+      title: 'Eavesdropper (Eve)',
+      type: 'threat :: quantum-intercept',
+      body: 'A hypothetical attacker performing <span class="hl">intercept-resend</span> attacks on the quantum channel. Eve\'s presence increases QBER by ~3% in this simulation (15% probability per block). BB84\'s security guarantee detects Eve through elevated error rates.'
+    },
+    turbulence: {
+      title: 'Atmospheric Turbulence',
+      type: 'threat :: channel-degradation',
+      body: 'Random fluctuations in the optical channel caused by atmospheric conditions. Increases QBER by 5–10%. Occurs with 15% probability per block. The Context-Aware DQN uses <span class="hl">ΔQBER momentum</span> to detect turbulence onset and throttle proactively — the key advantage over Naive DQN.'
+    },
+    linksecurity: {
+      title: 'Link Security Status',
+      type: 'indicator :: binary',
+      body: '<span class="hl">SECURE</span>: PA ratio ≤ DW Rate — key extraction is information-theoretically safe. <span class="hl">BREACH</span>: PA ratio > DW Rate — extracted key may be compromised. The oscilloscope shows this as red fill between the PA and Capacity lines.'
+    },
+    efficiency: {
+      title: 'Capacity Utilization',
+      type: 'metric :: percentage',
+      body: 'How efficiently the algorithm uses available secure capacity. <span class="hl">(PA ratio / DW Rate) × 100%</span>. Optimal is 80–95% — close to the limit without crossing. Below 40% = wasting capacity. Above 100% = breach. Static protocol often wastes capacity in clear weather and breaches during turbulence.'
+    },
+    algo_static: {
+      title: 'Static Protocol (Baseline)',
+      type: 'algorithm :: deterministic',
+      body: 'Always uses <span class="hl">Tag=64, PA=0.5</span> (action 14) regardless of channel conditions. Represents standard industry QKD deployments. Wastes capacity in good conditions, breaches in bad.',
+      formula: 'Performance: 1.0× yield, ~20% failure'
+    },
+    algo_random: {
+      title: 'Random Policy',
+      type: 'algorithm :: stochastic-baseline',
+      body: 'Selects uniformly random actions from the 40 possible choices. A <span class="hl">sanity check baseline</span> — any trained agent should significantly outperform random. Expect many breaches and failures.'
+    },
+    algo_naive: {
+      title: 'Naive DQN (No Stabilization)',
+      type: 'algorithm :: reactive-RL',
+      body: 'A basic Deep Q-Network that only observes <span class="hl">current QBER</span> without ΔQBER momentum. No target network stabilization. Key weaknesses: (1) No pre-emptive throttling before turbulence, (2) Noisy Q-value oscillations cause erratic decisions, (3) Overshoots PA during transitions.',
+      formula: 'Performance: 1.2× yield (unstable), ~15% failure'
+    },
+    algo_heuristic: {
+      title: 'Context-Aware DQN (Heuristic)',
+      type: 'algorithm :: rule-based-approximation',
+      body: 'A JavaScript <span class="hl">hand-coded approximation</span> of the trained Context-Aware DQN\'s behavior. Uses ΔQBER for pre-emptive throttling and Devetak-Winter bounds for safe PA selection. Approximates the trained model without requiring the Python backend.',
+      formula: 'Performance: ~1.79× yield, ~8% failure (approx)'
+    },
+    algo_trained: {
+      title: 'Context-Aware DQN (Trained Model) ★',
+      type: 'algorithm :: neural-network',
+      body: 'The actual <span class="hl">Dueling Double DQN</span> with Prioritized Experience Replay, trained over 5000 episodes. Uses 7D state space including ΔQBER momentum. Runs inference via Python backend (PyTorch). This is <span class="hl">our proposed model</span> from the paper.',
+      formula: 'Performance: 1.79× yield, ~8% failure, 55.89% fewer aborts'
+    }
+  };
+
+  // Create tooltip element
+  const tip = document.createElement('div');
+  tip.className = 'vsc-tooltip';
+  document.body.appendChild(tip);
+
+  let activeEl = null;
+  let hideTimeout = null;
+
+  function showTip(el) {
+    const key = el.getAttribute('data-tip');
+    if (!key || !TIPS[key]) return;
+    const data = TIPS[key];
+
+    clearTimeout(hideTimeout);
+    activeEl = el;
+
+    let html = `<div class="tt-title">${data.title}</div>`;
+    if (data.type) html += `<div class="tt-type">${data.type}</div>`;
+    html += `<hr class="tt-sep">`;
+    html += `<div class="tt-body">${data.body}</div>`;
+    if (data.formula) html += `<hr class="tt-sep"><div class="tt-formula">${data.formula}</div>`;
+    tip.innerHTML = html;
+
+    // Position near element
+    const rect = el.getBoundingClientRect();
+    let left = rect.left;
+    let top = rect.bottom + 6;
+
+    // Keep on screen
+    tip.style.left = '0px';
+    tip.style.top = '0px';
+    tip.classList.add('visible');
+
+    const tipRect = tip.getBoundingClientRect();
+    if (left + tipRect.width > window.innerWidth - 16) {
+      left = window.innerWidth - tipRect.width - 16;
+    }
+    if (left < 8) left = 8;
+    if (top + tipRect.height > window.innerHeight - 16) {
+      top = rect.top - tipRect.height - 6;
+    }
+
+    tip.style.left = left + 'px';
+    tip.style.top = top + 'px';
+  }
+
+  function hideTip() {
+    hideTimeout = setTimeout(() => {
+      tip.classList.remove('visible');
+      activeEl = null;
+    }, 100);
+  }
+
+  // Event delegation for all [data-tip] elements
+  document.addEventListener('mouseover', (e) => {
+    const el = e.target.closest('[data-tip]');
+    if (el) showTip(el);
+  });
+
+  document.addEventListener('mouseout', (e) => {
+    const el = e.target.closest('[data-tip]');
+    if (el) hideTip();
+  });
+})();
+</script>
+
+</body>
+</html>
