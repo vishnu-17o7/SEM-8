@@ -1,5 +1,5 @@
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Tuple
 
 import numpy as np
@@ -28,6 +28,12 @@ class Config:
     batch_size: int = 32
     lr: float = 1e-3
     epochs: int = 10
+
+
+def max_history_window(cfg: Config) -> int:
+    daily_blocks = cfg.daily_len // cfg.pred_len
+    weekly_blocks = cfg.weekly_len // cfg.pred_len
+    return max(cfg.recent_len, daily_blocks * cfg.day_stride, weekly_blocks * cfg.week_stride)
 
 
 def make_ring_adjacency(n_nodes: int) -> np.ndarray:
@@ -73,17 +79,30 @@ def generate_mock_traffic(cfg: Config, seed: int = 7) -> np.ndarray:
 
 
 def build_samples(data: np.ndarray, cfg: Config) -> Tuple[np.ndarray, ...]:
-    max_back = max(cfg.recent_len, cfg.daily_len + cfg.day_stride, cfg.weekly_len + cfg.week_stride)
+    max_back = max_history_window(cfg)
+    n_steps = data.shape[0]
+    daily_blocks = cfg.daily_len // cfg.pred_len
+    weekly_blocks = cfg.weekly_len // cfg.pred_len
     xh, xd, xw, y = [], [], [], []
 
-    for t0 in range(max_back, cfg.total_steps - cfg.pred_len):
+    for t0 in range(max_back, n_steps - cfg.pred_len):
         recent = data[t0 - cfg.recent_len : t0]
 
-        daily_start = t0 - cfg.day_stride - cfg.daily_len
-        daily = data[daily_start : daily_start + cfg.daily_len]
+        daily = np.concatenate(
+            [
+                data[t0 - i * cfg.day_stride : t0 - i * cfg.day_stride + cfg.pred_len]
+                for i in range(daily_blocks, 0, -1)
+            ],
+            axis=0,
+        )
 
-        weekly_start = t0 - cfg.week_stride - cfg.weekly_len
-        weekly = data[weekly_start : weekly_start + cfg.weekly_len]
+        weekly = np.concatenate(
+            [
+                data[t0 - i * cfg.week_stride : t0 - i * cfg.week_stride + cfg.pred_len]
+                for i in range(weekly_blocks, 0, -1)
+            ],
+            axis=0,
+        )
 
         target = data[t0 : t0 + cfg.pred_len, :, 0]
 
@@ -98,6 +117,21 @@ def build_samples(data: np.ndarray, cfg: Config) -> Tuple[np.ndarray, ...]:
 def run_training(cfg: Config) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    if cfg.daily_len % cfg.pred_len != 0:
+        raise ValueError("daily_len must be a multiple of pred_len to match ASTGCN daily-period sampling.")
+    if cfg.weekly_len % cfg.pred_len != 0:
+        raise ValueError("weekly_len must be a multiple of pred_len to match ASTGCN weekly-period sampling.")
+
+    # Ensure enough synthetic history exists for weekly/daily/recent windows.
+    min_samples = 64
+    min_total_steps = max_history_window(cfg) + cfg.pred_len + min_samples
+    if cfg.total_steps < min_total_steps:
+        print(
+            f"[info] total_steps={cfg.total_steps} is too small for the configured windows; "
+            f"using total_steps={min_total_steps} instead."
+        )
+        cfg = replace(cfg, total_steps=min_total_steps)
+
     adj = make_ring_adjacency(cfg.n_nodes)
     l_tilde = scaled_laplacian(adj)
     cheb = cheb_polynomials(l_tilde, cfg.k_order)
@@ -105,7 +139,14 @@ def run_training(cfg: Config) -> None:
     data = generate_mock_traffic(cfg)
     xh, xd, xw, y = build_samples(data, cfg)
 
-    split = int(0.8 * len(y))
+    if len(y) < 2:
+        raise RuntimeError(
+            "Not enough samples for a train/test split. Increase total_steps or reduce lookback windows."
+        )
+
+    split = max(1, int(0.8 * len(y)))
+    if split >= len(y):
+        split = len(y) - 1
     train_ds = TensorDataset(
         torch.tensor(xh[:split], dtype=torch.float32),
         torch.tensor(xd[:split], dtype=torch.float32),
@@ -162,6 +203,9 @@ def run_training(cfg: Config) -> None:
                 mse += torch.sum(diff * diff).item()
                 mae += torch.sum(torch.abs(diff)).item()
                 count += diff.numel()
+
+        if count == 0:
+            raise RuntimeError("Test set is empty; unable to compute evaluation metrics.")
 
         mse /= count
         mae /= count

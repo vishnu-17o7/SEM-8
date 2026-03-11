@@ -97,7 +97,7 @@ class ChebConvWithSAtt(nn.Module):
             for k in range(self.k_order):
                 t_k = self.cheb_polys[k]  # [N, N]
                 t_k_att = t_k.unsqueeze(0) * s_att  # [B, N, N]
-                rhs = torch.bmm(t_k_att.transpose(1, 2), x_t)  # [B, N, F_in]
+                rhs = torch.bmm(t_k_att, x_t)  # [B, N, F_in]
                 out_t = out_t + torch.matmul(rhs, self.theta[k])
             outputs.append(out_t.unsqueeze(-1))
         return F.relu(torch.cat(outputs, dim=-1))
