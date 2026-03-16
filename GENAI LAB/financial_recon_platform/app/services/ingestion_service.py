@@ -1,3 +1,7 @@
+import math
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Any
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
@@ -8,6 +12,42 @@ from app.models.enums import ScenarioType
 
 
 class IngestionService:
+    @staticmethod
+    def _json_safe(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {str(k): IngestionService._json_safe(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [IngestionService._json_safe(v) for v in value]
+
+        if value is None:
+            return None
+
+        if isinstance(value, float):
+            if math.isnan(value) or math.isinf(value):
+                return None
+            return value
+
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+
+        if isinstance(value, Decimal):
+            return float(value)
+
+        if hasattr(value, "item") and callable(getattr(value, "item")):
+            try:
+                return IngestionService._json_safe(value.item())
+            except Exception:
+                pass
+
+        if value.__class__.__name__ in {"NAType", "NaTType"}:
+            return None
+
+        text = str(value)
+        if text in {"NaN", "nan", "<NA>", "NaT"}:
+            return None
+
+        return value
+
     def ingest_file(
         self,
         db: Session,
@@ -26,7 +66,7 @@ class IngestionService:
                     scenario_type=scenario_type,
                     file_name=file_path.split("/")[-1],
                     row_number=rec.row_number,
-                    raw_payload=rec.payload,
+                    raw_payload=self._json_safe(rec.payload),
                     parser_name=parser.__class__.__name__,
                 )
             )

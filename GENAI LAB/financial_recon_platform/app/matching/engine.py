@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from datetime import date
 from decimal import Decimal
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
@@ -71,7 +71,7 @@ class HybridMatchingEngine:
         self,
         a: TransactionFeature,
         side_b: list[TransactionFeature],
-        scenario_filter: callable | None = None,
+        scenario_filter: Callable[[TransactionFeature, TransactionFeature], bool] | None = None,
     ) -> list[TransactionFeature]:
         candidates = []
         for b in side_b:
