@@ -1,5 +1,6 @@
 import argparse
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Tuple
 
 import numpy as np
@@ -28,6 +29,7 @@ class Config:
     batch_size: int = 32
     lr: float = 1e-3
     epochs: int = 10
+    plot_dir: str = "visualizations"
 
 
 def max_history_window(cfg: Config) -> int:
@@ -114,6 +116,95 @@ def build_samples(data: np.ndarray, cfg: Config) -> Tuple[np.ndarray, ...]:
     return np.array(xh), np.array(xd), np.array(xw), np.array(y)
 
 
+def save_visualizations(
+    out_dir: Path,
+    train_mse_hist: list[float],
+    test_rmse_hist: list[float],
+    test_mae_hist: list[float],
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+) -> None:
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    epochs = np.arange(1, len(train_mse_hist) + 1)
+
+    curves_fig = go.Figure()
+    curves_fig.add_trace(go.Scatter(x=epochs, y=train_mse_hist, mode="lines+markers", name="Train MSE"))
+    curves_fig.add_trace(go.Scatter(x=epochs, y=test_rmse_hist, mode="lines+markers", name="Test RMSE"))
+    curves_fig.add_trace(go.Scatter(x=epochs, y=test_mae_hist, mode="lines+markers", name="Test MAE"))
+    curves_fig.update_layout(
+        title="ASTGCN Training Curves",
+        xaxis_title="Epoch",
+        yaxis_title="Error",
+        template="plotly_white",
+        legend=dict(orientation="h", y=1.08, x=0.0),
+    )
+    curves_fig.write_html(str(out_dir / "training_curves.html"), include_plotlyjs="cdn")
+
+    sample_true = y_true[0]
+    sample_pred = y_pred[0]
+    sample_err = sample_pred - sample_true
+    n_nodes = sample_true.shape[0]
+    n_show = min(4, n_nodes)
+    node_ids = np.linspace(0, n_nodes - 1, n_show, dtype=int)
+    horizon = np.arange(sample_true.shape[1])
+
+    compare_fig = make_subplots(rows=n_show, cols=1, shared_xaxes=True, subplot_titles=[f"Node {n}" for n in node_ids])
+    for idx, node in enumerate(node_ids, start=1):
+        compare_fig.add_trace(
+            go.Scatter(x=horizon, y=sample_true[node], mode="lines", name=f"Node {node} True", line=dict(color="#222")),
+            row=idx,
+            col=1,
+        )
+        compare_fig.add_trace(
+            go.Scatter(
+                x=horizon,
+                y=sample_pred[node],
+                mode="lines",
+                name=f"Node {node} Pred",
+                line=dict(color="#d62728", dash="dash"),
+            ),
+            row=idx,
+            col=1,
+        )
+    compare_fig.update_layout(
+        title="Forecast vs Ground Truth (First Test Sample)",
+        template="plotly_white",
+        height=max(320, 220 * n_show),
+        legend=dict(orientation="h", y=1.04, x=0.0),
+    )
+    compare_fig.update_xaxes(title_text="Forecast Horizon Step", row=n_show, col=1)
+    compare_fig.write_html(str(out_dir / "forecast_vs_truth.html"), include_plotlyjs="cdn")
+
+    nodes = np.arange(n_nodes)
+    surf_fig = go.Figure(
+        data=[
+            go.Surface(
+                x=horizon,
+                y=nodes,
+                z=sample_err,
+                colorscale="RdBu",
+                colorbar=dict(title="Pred - True"),
+            )
+        ]
+    )
+    surf_fig.update_layout(
+        title="3D Error Surface Across Nodes and Forecast Horizon",
+        template="plotly_white",
+        scene=dict(
+            xaxis_title="Horizon Step",
+            yaxis_title="Node ID",
+            zaxis_title="Error",
+            camera=dict(eye=dict(x=1.45, y=1.35, z=0.8)),
+        ),
+        margin=dict(l=0, r=0, t=40, b=0),
+    )
+    surf_fig.write_html(str(out_dir / "error_surface_3d.html"), include_plotlyjs="cdn")
+
+
 def run_training(cfg: Config) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -179,6 +270,11 @@ def run_training(cfg: Config) -> None:
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)
     criterion = nn.MSELoss()
+    train_mse_hist: list[float] = []
+    test_rmse_hist: list[float] = []
+    test_mae_hist: list[float] = []
+    sample_true_np = None
+    sample_pred_np = None
 
     for epoch in range(1, cfg.epochs + 1):
         model.train()
@@ -199,6 +295,9 @@ def run_training(cfg: Config) -> None:
             for b_xh, b_xd, b_xw, b_y in test_loader:
                 b_xh, b_xd, b_xw, b_y = b_xh.to(device), b_xd.to(device), b_xw.to(device), b_y.to(device)
                 pred = model(b_xh, b_xd, b_xw)
+                if sample_true_np is None:
+                    sample_true_np = b_y.detach().cpu().numpy()
+                    sample_pred_np = pred.detach().cpu().numpy()
                 diff = pred - b_y
                 mse += torch.sum(diff * diff).item()
                 mae += torch.sum(torch.abs(diff)).item()
@@ -210,16 +309,36 @@ def run_training(cfg: Config) -> None:
         mse /= count
         mae /= count
         rmse = np.sqrt(mse)
+        train_mse_hist.append(train_loss)
+        test_rmse_hist.append(rmse)
+        test_mae_hist.append(mae)
         print(f"Epoch {epoch:02d} | train_mse={train_loss:.5f} | test_rmse={rmse:.5f} | test_mae={mae:.5f}")
+
+    if sample_true_np is None or sample_pred_np is None:
+        raise RuntimeError("No prediction samples available for visualization.")
+
+    try:
+        save_visualizations(
+            out_dir=Path(cfg.plot_dir),
+            train_mse_hist=train_mse_hist,
+            test_rmse_hist=test_rmse_hist,
+            test_mae_hist=test_mae_hist,
+            y_true=sample_true_np,
+            y_pred=sample_pred_np,
+        )
+        print(f"Saved plots to: {Path(cfg.plot_dir).resolve()}")
+    except ModuleNotFoundError:
+        print("[warn] plotly is not installed; skipping plot generation.")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train ASTGCN on mock traffic data")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--nodes", type=int, default=20)
+    parser.add_argument("--plot-dir", type=str, default="visualizations")
     args = parser.parse_args()
 
-    cfg = Config(n_nodes=args.nodes, epochs=args.epochs)
+    cfg = Config(n_nodes=args.nodes, epochs=args.epochs, plot_dir=args.plot_dir)
     run_training(cfg)
 
 

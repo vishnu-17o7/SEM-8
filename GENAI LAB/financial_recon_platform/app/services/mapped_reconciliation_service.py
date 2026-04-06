@@ -14,6 +14,7 @@ from app.llm.interfaces import LLMClient
 from app.llm.mock_clients import MockLLMClient
 from app.llm.openrouter_client import OpenRouterClient
 from app.llm.prompt_builders import (
+    build_exception_bucket_classification_prompt,
     build_column_mapping_prompt,
     build_llm_reconciliation_prompt,
 )
@@ -28,7 +29,7 @@ from app.models.entities import (
 from app.models.enums import ExceptionStatus, JobStatus, MatchType, ScenarioType
 from app.schemas.common import JobCreateRequest
 from app.services.ingestion_service import IngestionService
-from app.services.normalization_service import normalize_record
+from app.services.normalization_service import bulk_enrich_records, normalize_record
 from app.services.reconciliation_service import ReconciliationService
 
 SUPPORTED_MAPPING_FIELDS: list[dict[str, Any]] = [
@@ -73,6 +74,65 @@ FIELD_ALIASES: dict[str, list[str]] = {
         "id",
     ],
 }
+
+RECON_BUCKET_SPECS: dict[str, dict[str, Any]] = {
+    "bank_deposits_in_transit": {
+        "label": "Add Deposits In Transit",
+        "summary_side": "bank_statement",
+        "operation": "add",
+        "journal_required": False,
+    },
+    "bank_outstanding_cheques": {
+        "label": "Deduct Outstanding Cheques",
+        "summary_side": "bank_statement",
+        "operation": "deduct",
+        "journal_required": False,
+    },
+    "bank_errors": {
+        "label": "Add/Deduct Bank Errors",
+        "summary_side": "bank_statement",
+        "operation": "variable",
+        "journal_required": False,
+    },
+    "cash_missing_receipts": {
+        "label": "Add Missing Receipts",
+        "summary_side": "cash_book",
+        "operation": "add",
+        "journal_required": True,
+    },
+    "cash_interest_received": {
+        "label": "Add Interest Received",
+        "summary_side": "cash_book",
+        "operation": "add",
+        "journal_required": True,
+    },
+    "cash_bank_fees": {
+        "label": "Deduct Bank Fees",
+        "summary_side": "cash_book",
+        "operation": "deduct",
+        "journal_required": True,
+    },
+    "cash_bounced_cheques": {
+        "label": "Deduct Bounced Cheques",
+        "summary_side": "cash_book",
+        "operation": "deduct",
+        "journal_required": True,
+    },
+    "cash_book_errors": {
+        "label": "Add/Deduct Errors In Cash Book",
+        "summary_side": "cash_book",
+        "operation": "variable",
+        "journal_required": True,
+    },
+    "uncategorized": {
+        "label": "Uncategorized",
+        "summary_side": None,
+        "operation": "none",
+        "journal_required": False,
+    },
+}
+
+BALANCE_COLUMN_HINTS = ["closing balance", "balance", "closing", "bal"]
 
 
 def _get_llm_client() -> LLMClient:
@@ -200,10 +260,16 @@ class ColumnMappingService:
             supported_fields=SUPPORTED_MAPPING_FIELDS,
         )
 
-        llm_response: dict[str, Any]
+        llm_response: Any = None
         try:
             llm_response = self.llm_client.complete_json(prompt)
-        except Exception:
+        except Exception as exc:
+            print("Column mapping LLM call failed.")
+            print("Prompt sent to LLM:")
+            print(prompt)
+            print("LLM output received before failure:")
+            print(llm_response)
+            print(f"Error while parsing column mapping response: {exc}")
             llm_response = {}
 
         llm_by_field: dict[str, dict[str, Any]] = {}
@@ -357,14 +423,50 @@ class ColumnMappingService:
                     }
                 )
 
+            if has_amount and has_debit_credit:
+                issues.append(
+                    {
+                        "scope": "mapping",
+                        "severity": "warning",
+                        "side": side_name,
+                        "field": "amount",
+                        "message": (
+                            f"{side_name.capitalize()} maps both Amount and Debit/Credit; "
+                            "system will prioritize Debit/Credit for signed normalization"
+                        ),
+                    }
+                )
+
         return issues
 
 
 class MappedReconciliationService:
     def __init__(self, llm_client: LLMClient | None = None):
+        self.settings = get_settings()
         self.llm_client = llm_client or _get_llm_client()
         self.mapping_service = ColumnMappingService(self.llm_client)
         self.recon_service = ReconciliationService(llm_client=self.llm_client)
+        self.llm_reconciliation_batch_size = max(
+            1,
+            int(getattr(self.settings, "llm_reconciliation_batch_size", 100)),
+        )
+        self.llm_reconciliation_side_batch_size = max(
+            1,
+            self.llm_reconciliation_batch_size // 2,
+        )
+        self.llm_normalization_batch_size = max(
+            1,
+            int(
+                getattr(
+                    self.settings,
+                    "llm_normalization_batch_size",
+                    self.llm_reconciliation_batch_size,
+                )
+            ),
+        )
+        self.llm_row_enrichment_enabled = bool(
+            getattr(self.settings, "llm_row_enrichment_enabled", False)
+        )
 
     @staticmethod
     def _build_mapping_index(
@@ -393,13 +495,22 @@ class MappedReconciliationService:
         for field in FIELD_SPEC_BY_NAME:
             mapped_fields[field] = cls._extract_row_value(row, mapping_index.get(field))
 
+        debit_value = mapped_fields.get("debit")
+        credit_value = mapped_fields.get("credit")
+        has_debit_credit_values = not ColumnMappingService._is_missing(
+            debit_value
+        ) or not ColumnMappingService._is_missing(credit_value)
+        amount_value = (
+            None if has_debit_credit_values else mapped_fields.get("amount")
+        )
+
         normalize_payload = {
             "txn_date": mapped_fields.get("transaction_date"),
             "value_date": mapped_fields.get("value_date"),
             "description": mapped_fields.get("description"),
-            "amount": mapped_fields.get("amount"),
-            "debit": mapped_fields.get("debit"),
-            "credit": mapped_fields.get("credit"),
+            "amount": amount_value,
+            "debit": debit_value,
+            "credit": credit_value,
             "currency": mapped_fields.get("currency") or "INR",
             "reference": mapped_fields.get("reference"),
             "counterparty": mapped_fields.get("counterparty"),
@@ -536,6 +647,178 @@ class MappedReconciliationService:
             return default_value
 
     @staticmethod
+    def _token_set(text: Any) -> set[str]:
+        if text is None:
+            return set()
+        tokens = re.findall(r"[a-z0-9]+", str(text).lower())
+        return {token for token in tokens if len(token) > 2}
+
+    @classmethod
+    def _best_deterministic_candidate(
+        cls,
+        left_txn: TransactionNormalized,
+        right_candidates: list[TransactionNormalized],
+        used_right_ids: set[str],
+    ) -> dict[str, Any] | None:
+        best_candidate: dict[str, Any] | None = None
+
+        left_ref = str(left_txn.reference_number or "").strip().lower()
+        left_cp = str(left_txn.counterparty_normalized or "").strip().lower()
+        left_tokens = cls._token_set(left_txn.description_clean)
+
+        for right_txn in right_candidates:
+            if right_txn.id in used_right_ids:
+                continue
+
+            if str(left_txn.currency or "").upper() != str(right_txn.currency or "").upper():
+                continue
+
+            amount_delta = abs(
+                Decimal(str(left_txn.amount)) - Decimal(str(right_txn.amount))
+            )
+            amount_base = max(
+                abs(Decimal(str(left_txn.amount))),
+                abs(Decimal(str(right_txn.amount))),
+                Decimal("1"),
+            )
+            amount_ratio = float(amount_delta / amount_base)
+
+            date_delta_days = abs(
+                (left_txn.transaction_date - right_txn.transaction_date).days
+            )
+
+            right_ref = str(right_txn.reference_number or "").strip().lower()
+            right_cp = str(right_txn.counterparty_normalized or "").strip().lower()
+            right_tokens = cls._token_set(right_txn.description_clean)
+
+            ref_exact = bool(left_ref and right_ref and left_ref == right_ref)
+            ref_partial = bool(
+                left_ref
+                and right_ref
+                and (
+                    left_ref in right_ref
+                    or right_ref in left_ref
+                    or left_ref.split("-")[-1] == right_ref.split("-")[-1]
+                )
+            )
+            cp_exact = bool(left_cp and right_cp and left_cp == right_cp)
+            desc_overlap = len(left_tokens & right_tokens)
+
+            qualifies = (
+                (ref_exact and date_delta_days <= 10 and amount_ratio <= 0.05)
+                or (
+                    amount_ratio <= 0.005
+                    and date_delta_days <= 7
+                    and (cp_exact or desc_overlap > 0 or ref_partial)
+                )
+                or (amount_ratio <= 0.001 and date_delta_days <= 2)
+            )
+            if not qualifies:
+                continue
+
+            rank = (
+                0 if ref_exact else 1,
+                0 if cp_exact else 1,
+                0 if ref_partial else 1,
+                round(amount_ratio, 8),
+                date_delta_days,
+                -desc_overlap,
+                str(right_txn.id or ""),
+            )
+
+            confidence = min(
+                0.79,
+                max(
+                    0.65,
+                    0.62
+                    + (0.14 if ref_exact else 0)
+                    + (0.06 if ref_partial else 0)
+                    + (0.08 if cp_exact else 0)
+                    + min(0.08, 0.02 * desc_overlap)
+                    + max(0.0, 0.06 - min(0.06, amount_ratio * 1.5))
+                    + max(0.0, 0.04 - min(0.04, date_delta_days / 100.0)),
+                ),
+            )
+
+            reason_parts = [
+                "Deterministic fallback",
+                f"amount_delta={amount_delta}",
+                f"date_delta={date_delta_days}d",
+            ]
+            if ref_exact:
+                reason_parts.append("reference_exact")
+            elif ref_partial:
+                reason_parts.append("reference_partial")
+            if cp_exact:
+                reason_parts.append("counterparty_exact")
+            if desc_overlap > 0:
+                reason_parts.append(f"desc_overlap={desc_overlap}")
+
+            candidate = {
+                "rank": rank,
+                "right_txn": right_txn,
+                "amount_delta": amount_delta,
+                "date_delta_days": date_delta_days,
+                "confidence": round(confidence, 4),
+                "reason": ", ".join(reason_parts),
+            }
+
+            if best_candidate is None or candidate["rank"] < best_candidate["rank"]:
+                best_candidate = candidate
+
+        return best_candidate
+
+    @staticmethod
+    def _dict_items(value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        return [item for item in value if isinstance(item, dict)]
+
+    @staticmethod
+    def _chunk_transactions(
+        transactions: list[TransactionNormalized], chunk_size: int
+    ) -> list[list[TransactionNormalized]]:
+        if chunk_size <= 0:
+            chunk_size = 1
+        return [
+            transactions[i : i + chunk_size]
+            for i in range(0, len(transactions), chunk_size)
+        ]
+
+    @classmethod
+    def _normalize_llm_reconciliation_payload(
+        cls, payload: Any
+    ) -> dict[str, list[dict[str, Any]]]:
+        if not isinstance(payload, dict):
+            return {
+                "matches": [],
+                "unmatched_left": [],
+                "unmatched_right": [],
+            }
+
+        return {
+            "matches": cls._dict_items(payload.get("matches")),
+            "unmatched_left": cls._dict_items(payload.get("unmatched_left")),
+            "unmatched_right": cls._dict_items(payload.get("unmatched_right")),
+        }
+
+    @staticmethod
+    def _extract_match_ids(item: dict[str, Any]) -> tuple[str, str]:
+        left_id = str(
+            item.get("left_transaction_id")
+            or item.get("transaction_a_id")
+            or item.get("left_id")
+            or ""
+        ).strip()
+        right_id = str(
+            item.get("right_transaction_id")
+            or item.get("transaction_b_id")
+            or item.get("right_id")
+            or ""
+        ).strip()
+        return left_id, right_id
+
+    @staticmethod
     def _reason_by_transaction(items: Any) -> dict[str, str]:
         if not isinstance(items, list):
             return {}
@@ -550,6 +833,362 @@ class MappedReconciliationService:
                 item.get("reason") or "No counterpart identified by LLM"
             )
         return reasons
+
+    @staticmethod
+    def _normalize_exception_bucket_payload(payload: Any) -> list[dict[str, Any]]:
+        if isinstance(payload, dict):
+            items = payload.get("classified_exceptions")
+            if isinstance(items, list):
+                return [item for item in items if isinstance(item, dict)]
+            return []
+        if isinstance(payload, list):
+            return [item for item in payload if isinstance(item, dict)]
+        return []
+
+    @staticmethod
+    def _parse_decimal_like(value: Any) -> Decimal:
+        if value is None:
+            return Decimal("0")
+        if isinstance(value, Decimal):
+            return value
+        if isinstance(value, (int, float)):
+            return Decimal(str(value))
+
+        text = str(value).strip()
+        if not text:
+            return Decimal("0")
+
+        negative = False
+        if text.startswith("(") and text.endswith(")"):
+            negative = True
+            text = text[1:-1]
+
+        text = text.replace(",", "")
+        cleaned = re.sub(r"[^0-9.\-]", "", text)
+        if cleaned in {"", ".", "-", "-."}:
+            return Decimal("0")
+
+        try:
+            parsed = Decimal(cleaned)
+            return -abs(parsed) if negative else parsed
+        except Exception:
+            return Decimal("0")
+
+    @classmethod
+    def _extract_unadjusted_closing_balance(cls, frame: pd.DataFrame) -> Decimal:
+        if frame is None or frame.empty:
+            return Decimal("0")
+
+        candidates: list[str] = []
+        for column in frame.columns:
+            col_text = str(column).strip().lower()
+            if any(hint in col_text for hint in BALANCE_COLUMN_HINTS):
+                candidates.append(str(column))
+
+        for column in candidates:
+            series = frame[column]
+            for idx in range(len(series) - 1, -1, -1):
+                value = series.iloc[idx]
+                if ColumnMappingService._is_missing(value):
+                    continue
+                parsed = cls._parse_decimal_like(value)
+                if parsed != Decimal("0"):
+                    return parsed
+
+        return Decimal("0")
+
+    @staticmethod
+    def _resolve_bucket_operation(
+        default_operation: str,
+        direction: str | None,
+    ) -> str:
+        if default_operation in {"add", "deduct", "none"}:
+            return default_operation
+        if default_operation != "variable":
+            return "none"
+
+        direction_text = str(direction or "").strip().lower()
+        if direction_text in {"in", "credit", "cr", "c"}:
+            return "add"
+        if direction_text in {"out", "debit", "dr", "d"}:
+            return "deduct"
+        return "none"
+
+    @classmethod
+    def _signed_amount(cls, amount: Decimal, operation: str) -> Decimal:
+        if operation == "add":
+            return abs(amount)
+        if operation == "deduct":
+            return -abs(amount)
+        return Decimal("0")
+
+    def _classify_exceptions(
+        self,
+        left_label: str,
+        right_label: str,
+        exceptions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not exceptions:
+            return []
+
+        llm_input: list[dict[str, Any]] = []
+        by_exception_id: dict[str, dict[str, Any]] = {}
+
+        for item in exceptions:
+            exception_id = str(item.get("id") or "").strip()
+            if not exception_id:
+                continue
+            transaction = item.get("transaction") or {}
+            llm_input.append(
+                {
+                    "exception_id": exception_id,
+                    "transaction_id": str(item.get("txn") or ""),
+                    "side": str(transaction.get("side") or ""),
+                    "amount": str(transaction.get("amount") or "0"),
+                    "currency": str(transaction.get("currency") or ""),
+                    "direction": str(transaction.get("direction") or ""),
+                    "reference": str(transaction.get("reference") or ""),
+                    "counterparty": str(transaction.get("counterparty") or ""),
+                    "description": str(transaction.get("description") or ""),
+                    "reason": str(item.get("reason") or ""),
+                    "reason_detail": str(item.get("reason_detail") or ""),
+                    "recommended_action": str(item.get("recommended_action") or ""),
+                }
+            )
+            by_exception_id[exception_id] = item
+
+        prompt = build_exception_bucket_classification_prompt(
+            left_label=left_label,
+            right_label=right_label,
+            exceptions=llm_input,
+        )
+
+        llm_response: Any = None
+        try:
+            llm_response = self.llm_client.complete_json(prompt)
+        except Exception as exc:
+            print("Exception bucket classification LLM call failed.")
+            print("Prompt sent to LLM:")
+            print(prompt)
+            print("LLM output received before failure:")
+            print(llm_response)
+            print(f"Error while parsing exception bucket response: {exc}")
+            llm_response = {}
+
+        llm_by_exception_id: dict[str, dict[str, Any]] = {}
+        for row in self._normalize_exception_bucket_payload(llm_response):
+            exception_id = str(row.get("exception_id") or "").strip()
+            if exception_id:
+                llm_by_exception_id[exception_id] = row
+
+        classified: list[dict[str, Any]] = []
+        for item in llm_input:
+            exception_id = item["exception_id"]
+            original = by_exception_id[exception_id]
+            transaction = original.get("transaction") or {}
+            side = str(transaction.get("side") or "").upper()
+            direction = str(transaction.get("direction") or "")
+            amount = self._parse_decimal_like(transaction.get("amount"))
+
+            llm_item = llm_by_exception_id.get(exception_id, {})
+            bucket_key = str(llm_item.get("bucket_key") or "uncategorized").strip()
+            if bucket_key not in RECON_BUCKET_SPECS:
+                bucket_key = "uncategorized"
+
+            if side == "A" and bucket_key.startswith("cash_"):
+                bucket_key = "uncategorized"
+            if side == "B" and bucket_key.startswith("bank_"):
+                bucket_key = "uncategorized"
+
+            bucket_spec = RECON_BUCKET_SPECS[bucket_key]
+            operation = self._resolve_bucket_operation(
+                str(bucket_spec["operation"]),
+                direction,
+            )
+            signed_amount = self._signed_amount(amount, operation)
+            confidence = self._confidence(llm_item.get("confidence"), default_value=0.0)
+
+            classified.append(
+                {
+                    "exception_id": exception_id,
+                    "transaction_id": str(original.get("txn") or ""),
+                    "side": side,
+                    "bucket_key": bucket_key,
+                    "bucket_label": str(bucket_spec["label"]),
+                    "summary_side": bucket_spec["summary_side"],
+                    "operation": operation,
+                    "amount": str(abs(amount)),
+                    "signed_amount": str(signed_amount),
+                    "direction": direction,
+                    "confidence": confidence,
+                    "rationale": str(
+                        llm_item.get("rationale")
+                        or "No reliable classification evidence from model output"
+                    ),
+                    "journal_required": bool(bucket_spec["journal_required"]),
+                }
+            )
+
+        return classified
+
+    @classmethod
+    def _build_reconciliation_summary(
+        cls,
+        left_df: pd.DataFrame,
+        right_df: pd.DataFrame,
+        classified_exceptions: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        unadjusted_bank = cls._extract_unadjusted_closing_balance(left_df)
+        unadjusted_cash = cls._extract_unadjusted_closing_balance(right_df)
+
+        bucket_totals: dict[str, dict[str, Any]] = {}
+        for key, spec in RECON_BUCKET_SPECS.items():
+            if key == "uncategorized":
+                continue
+            bucket_totals[key] = {
+                "bucket_key": key,
+                "bucket_label": spec["label"],
+                "summary_side": spec["summary_side"],
+                "operation": spec["operation"],
+                "amount_total": Decimal("0"),
+                "signed_total": Decimal("0"),
+                "count": 0,
+            }
+
+        for row in classified_exceptions:
+            bucket_key = str(row.get("bucket_key") or "")
+            if bucket_key not in bucket_totals:
+                continue
+            amount = cls._parse_decimal_like(row.get("amount"))
+            signed_amount = cls._parse_decimal_like(row.get("signed_amount"))
+            bucket_totals[bucket_key]["amount_total"] += abs(amount)
+            bucket_totals[bucket_key]["signed_total"] += signed_amount
+            bucket_totals[bucket_key]["count"] += 1
+
+        bank_adjustments = [
+            {
+                "bucket_key": row["bucket_key"],
+                "label": row["bucket_label"],
+                "operation": cls._resolve_bucket_operation(
+                    str(row["operation"]),
+                    None,
+                ),
+                "amount": str(row["amount_total"]),
+                "count": row["count"],
+                "signed_amount": str(row["signed_total"]),
+            }
+            for row in bucket_totals.values()
+            if row["summary_side"] == "bank_statement"
+        ]
+        cash_adjustments = [
+            {
+                "bucket_key": row["bucket_key"],
+                "label": row["bucket_label"],
+                "operation": cls._resolve_bucket_operation(
+                    str(row["operation"]),
+                    None,
+                ),
+                "amount": str(row["amount_total"]),
+                "count": row["count"],
+                "signed_amount": str(row["signed_total"]),
+            }
+            for row in bucket_totals.values()
+            if row["summary_side"] == "cash_book"
+        ]
+
+        bank_signed_total = sum(
+            (cls._parse_decimal_like(item["signed_amount"]) for item in bank_adjustments),
+            Decimal("0"),
+        )
+        cash_signed_total = sum(
+            (cls._parse_decimal_like(item["signed_amount"]) for item in cash_adjustments),
+            Decimal("0"),
+        )
+
+        adjusted_bank = unadjusted_bank + bank_signed_total
+        adjusted_cash = unadjusted_cash + cash_signed_total
+        unreconciled = abs(adjusted_bank - adjusted_cash)
+
+        return {
+            "bank_statement": {
+                "unadjusted_closing_balance": str(unadjusted_bank),
+                "adjustments": bank_adjustments,
+                "adjusted_closing_balance": str(adjusted_bank),
+            },
+            "cash_book": {
+                "unadjusted_closing_balance": str(unadjusted_cash),
+                "adjustments": cash_adjustments,
+                "adjusted_closing_balance": str(adjusted_cash),
+            },
+            "unreconciled_amount": str(unreconciled),
+            "classification_count": len(classified_exceptions),
+            "calculation_notes": [
+                "Adjusted side balance = unadjusted balance + sum(additions) - sum(deductions)",
+                "Unreconciled amount = absolute difference between adjusted side balances",
+            ],
+        }
+
+    @classmethod
+    def _build_journal_entries(
+        cls,
+        classified_exceptions: list[dict[str, Any]],
+        period_end: date,
+    ) -> list[dict[str, Any]]:
+        account_rules = {
+            "cash_missing_receipts": ("Cash", "Accounts Receivable"),
+            "cash_interest_received": ("Cash", "Interest Income"),
+            "cash_bank_fees": ("Bank Fees Expense", "Cash"),
+            "cash_bounced_cheques": ("Accounts Receivable", "Cash"),
+        }
+
+        entries: list[dict[str, Any]] = []
+        for idx, row in enumerate(classified_exceptions, start=1):
+            if not row.get("journal_required"):
+                continue
+
+            bucket_key = str(row.get("bucket_key") or "")
+            amount = abs(cls._parse_decimal_like(row.get("amount")))
+            if amount <= Decimal("0"):
+                continue
+
+            debit_account = ""
+            credit_account = ""
+            operation = str(row.get("operation") or "none")
+
+            if bucket_key in account_rules:
+                debit_account, credit_account = account_rules[bucket_key]
+            elif bucket_key == "cash_book_errors":
+                if operation == "add":
+                    debit_account, credit_account = (
+                        "Cash",
+                        "Suspense - Cash Book Error",
+                    )
+                elif operation == "deduct":
+                    debit_account, credit_account = (
+                        "Suspense - Cash Book Error",
+                        "Cash",
+                    )
+
+            if not debit_account or not credit_account:
+                continue
+
+            entries.append(
+                {
+                    "entry_id": f"JE-{idx:04d}",
+                    "entry_date": str(period_end),
+                    "bucket_key": bucket_key,
+                    "narration": str(
+                        row.get("rationale")
+                        or "Reconciliation adjustment entry"
+                    ),
+                    "debit_account": debit_account,
+                    "credit_account": credit_account,
+                    "amount": str(amount),
+                    "source_exception_ids": [str(row.get("exception_id") or "")],
+                }
+            )
+
+        return entries
 
     def _run_llm_reconciliation(
         self,
@@ -584,95 +1223,269 @@ class MappedReconciliationService:
 
             side_a = [txn for txn in txns if txn.side == "A"]
             side_b = [txn for txn in txns if txn.side == "B"]
+
+            def _sort_key(txn: TransactionNormalized) -> tuple[Any, ...]:
+                metadata = txn.metadata_json if isinstance(txn.metadata_json, dict) else {}
+                row_number_raw = metadata.get("row_number")
+                try:
+                    row_number = int(row_number_raw)
+                except (TypeError, ValueError):
+                    row_number = 10**9
+
+                return (
+                    txn.transaction_date,
+                    Decimal(str(txn.amount)),
+                    str(txn.currency or ""),
+                    str(txn.reference_number or ""),
+                    str(txn.description_clean or ""),
+                    str(txn.counterparty_normalized or ""),
+                    row_number,
+                    str(txn.id or ""),
+                )
+
+            side_a.sort(
+                key=_sort_key
+            )
+            side_b.sort(
+                key=_sort_key
+            )
             side_a_by_id = {txn.id: txn for txn in side_a}
             side_b_by_id = {txn.id: txn for txn in side_b}
-
-            llm_prompt = build_llm_reconciliation_prompt(
-                scenario_type=scenario_type.value,
-                left_transactions=[
-                    self._llm_transaction_payload(txn) for txn in side_a
-                ],
-                right_transactions=[
-                    self._llm_transaction_payload(txn) for txn in side_b
-                ],
-            )
-            llm_response = self.llm_client.complete_json(llm_prompt)
-
-            raw_matches = (
-                llm_response.get("matches", [])
-                if isinstance(llm_response, dict)
-                else []
-            )
             matched_left_ids: set[str] = set()
             matched_right_ids: set[str] = set()
             persisted_matches: list[Match] = []
+            unmatched_left_reasons: dict[str, str] = {}
+            unmatched_right_reasons: dict[str, str] = {}
 
-            for item in raw_matches:
-                if not isinstance(item, dict):
+            left_chunks = self._chunk_transactions(
+                side_a, self.llm_reconciliation_side_batch_size
+            )
+            for left_batch in left_chunks:
+
+                left_batch = [
+                    txn for txn in left_batch if txn.id not in matched_left_ids
+                ]
+
+                if not left_batch:
                     continue
 
-                left_id = str(
-                    item.get("left_transaction_id")
-                    or item.get("transaction_a_id")
-                    or ""
-                ).strip()
-                right_id = str(
-                    item.get("right_transaction_id")
-                    or item.get("transaction_b_id")
-                    or ""
-                ).strip()
+                right_pool = [
+                    txn for txn in side_b if txn.id not in matched_right_ids
+                ]
 
-                if not left_id or not right_id:
-                    continue
-                if left_id in matched_left_ids or right_id in matched_right_ids:
-                    continue
-                if left_id not in side_a_by_id or right_id not in side_b_by_id:
+                if not right_pool:
+                    for txn in left_batch:
+                        unmatched_left_reasons.setdefault(
+                            txn.id,
+                            "No right-side counterpart in this reconciliation batch",
+                        )
                     continue
 
-                left_txn = side_a_by_id[left_id]
-                right_txn = side_b_by_id[right_id]
-                confidence = self._confidence(
-                    item.get("confidence"), default_value=0.75
+                def _right_rank(right_txn: TransactionNormalized) -> tuple[Any, ...]:
+                    best_rank: tuple[Any, ...] | None = None
+                    for left_txn in left_batch:
+                        currency_mismatch = (
+                            str(left_txn.currency or "").upper()
+                            != str(right_txn.currency or "").upper()
+                        )
+                        currency_penalty = 1 if currency_mismatch else 0
+                        date_delta = abs(
+                            (left_txn.transaction_date - right_txn.transaction_date).days
+                        )
+                        amount_delta = abs(
+                            Decimal(str(left_txn.amount))
+                            - Decimal(str(right_txn.amount))
+                        )
+                        rank = (
+                            currency_penalty,
+                            date_delta,
+                            amount_delta,
+                            str(right_txn.reference_number or ""),
+                            str(right_txn.id or ""),
+                        )
+                        if best_rank is None or rank < best_rank:
+                            best_rank = rank
+
+                    if best_rank is None:
+                        return (1, 9999, Decimal("9999999"), "", str(right_txn.id or ""))
+                    return best_rank
+
+                right_batch = sorted(right_pool, key=_right_rank)[
+                    : max(1, self.llm_reconciliation_batch_size - len(left_batch))
+                ]
+
+                if not right_batch:
+                    for txn in left_batch:
+                        unmatched_left_reasons.setdefault(
+                            txn.id,
+                            "No right-side candidates available in this reconciliation batch",
+                        )
+                    continue
+
+                llm_prompt = build_llm_reconciliation_prompt(
+                    scenario_type=scenario_type.value,
+                    left_transactions=[
+                        self._llm_transaction_payload(txn) for txn in left_batch
+                    ],
+                    right_transactions=[
+                        self._llm_transaction_payload(txn) for txn in right_batch
+                    ],
                 )
-                amount_delta = abs(
-                    Decimal(str(left_txn.amount)) - Decimal(str(right_txn.amount))
-                )
-                date_delta_days = abs(
-                    (left_txn.transaction_date - right_txn.transaction_date).days
-                )
 
-                match_record = Match(
+                llm_response: Any = None
+                try:
+                    llm_response = self.llm_client.complete_json(llm_prompt)
+                    parsed_response = self._normalize_llm_reconciliation_payload(
+                        llm_response
+                    )
+                except Exception as exc:
+                    print("LLM reconciliation batch failed.")
+                    print("Prompt sent to LLM:")
+                    print(llm_prompt)
+                    print("LLM output received before failure:")
+                    print(llm_response)
+                    print(f"Error while parsing reconciliation response: {exc}")
+                    parsed_response = {
+                        "matches": [],
+                        "unmatched_left": [
+                            {
+                                "transaction_id": txn.id,
+                                "reason": "LLM did not return valid JSON for this batch",
+                            }
+                            for txn in left_batch
+                        ],
+                        "unmatched_right": [
+                            {
+                                "transaction_id": txn.id,
+                                "reason": "LLM did not return valid JSON for this batch",
+                            }
+                            for txn in right_batch
+                        ],
+                    }
+
+                for txn_id, reason in self._reason_by_transaction(
+                    parsed_response.get("unmatched_left")
+                ).items():
+                    if txn_id in side_a_by_id:
+                        unmatched_left_reasons[txn_id] = reason
+
+                for txn_id, reason in self._reason_by_transaction(
+                    parsed_response.get("unmatched_right")
+                ).items():
+                    if txn_id in side_b_by_id:
+                        unmatched_right_reasons[txn_id] = reason
+
+                for item in parsed_response.get("matches", []):
+                    left_id, right_id = self._extract_match_ids(item)
+
+                    if not left_id or not right_id:
+                        continue
+                    if left_id in matched_left_ids or right_id in matched_right_ids:
+                        continue
+                    if left_id not in side_a_by_id or right_id not in side_b_by_id:
+                        continue
+
+                    left_txn = side_a_by_id[left_id]
+                    right_txn = side_b_by_id[right_id]
+                    confidence = self._confidence(
+                        item.get("confidence"), default_value=0.75
+                    )
+                    amount_delta = abs(
+                        Decimal(str(left_txn.amount)) - Decimal(str(right_txn.amount))
+                    )
+                    date_delta_days = abs(
+                        (left_txn.transaction_date - right_txn.transaction_date).days
+                    )
+
+                    match_record = Match(
+                        reconciliation_job_id=job.id,
+                        transaction_a_id=left_id,
+                        transaction_b_id=right_id,
+                        match_type=MatchType.ONE_TO_ONE,
+                        confidence_score=Decimal(str(round(confidence, 4))),
+                        algorithm_used="llm_reconciliation",
+                        amount_delta=amount_delta,
+                        date_delta_days=date_delta_days,
+                        auto_accepted=confidence >= 0.8,
+                        llm_reason=str(
+                            item.get("reason")
+                            or "LLM semantic reconciliation decision"
+                        ),
+                    )
+                    db.add(match_record)
+                    persisted_matches.append(match_record)
+
+                    matched_left_ids.add(left_id)
+                    matched_right_ids.add(right_id)
+
+                # Deterministic safety net when strict LLM output returns sparse/empty matches.
+                unmatched_left_in_batch = [
+                    txn for txn in left_batch if txn.id not in matched_left_ids
+                ]
+                available_right_in_batch = [
+                    txn for txn in right_batch if txn.id not in matched_right_ids
+                ]
+
+                for left_txn in unmatched_left_in_batch:
+                    candidate = self._best_deterministic_candidate(
+                        left_txn=left_txn,
+                        right_candidates=available_right_in_batch,
+                        used_right_ids=matched_right_ids,
+                    )
+                    if not candidate:
+                        continue
+
+                    best_right = candidate["right_txn"]
+                    fallback_match = Match(
+                        reconciliation_job_id=job.id,
+                        transaction_a_id=left_txn.id,
+                        transaction_b_id=best_right.id,
+                        match_type=MatchType.ONE_TO_ONE,
+                        confidence_score=Decimal(str(candidate["confidence"])),
+                        algorithm_used="heuristic_batch_fallback",
+                        amount_delta=candidate["amount_delta"],
+                        date_delta_days=candidate["date_delta_days"],
+                        auto_accepted=False,
+                        llm_reason=str(candidate["reason"]),
+                    )
+                    db.add(fallback_match)
+                    persisted_matches.append(fallback_match)
+                    matched_left_ids.add(left_txn.id)
+                    matched_right_ids.add(best_right.id)
+
+            # Global deterministic pass for cross-batch candidates that may be missed by local batches.
+            remaining_left = [txn for txn in side_a if txn.id not in matched_left_ids]
+            remaining_right = [txn for txn in side_b if txn.id not in matched_right_ids]
+
+            for left_txn in remaining_left:
+                candidate = self._best_deterministic_candidate(
+                    left_txn=left_txn,
+                    right_candidates=remaining_right,
+                    used_right_ids=matched_right_ids,
+                )
+                if not candidate:
+                    continue
+
+                best_right = candidate["right_txn"]
+                global_fallback_match = Match(
                     reconciliation_job_id=job.id,
-                    transaction_a_id=left_id,
-                    transaction_b_id=right_id,
+                    transaction_a_id=left_txn.id,
+                    transaction_b_id=best_right.id,
                     match_type=MatchType.ONE_TO_ONE,
-                    confidence_score=Decimal(str(round(confidence, 4))),
-                    algorithm_used="llm_reconciliation",
-                    amount_delta=amount_delta,
-                    date_delta_days=date_delta_days,
-                    auto_accepted=confidence >= 0.8,
-                    llm_reason=str(
-                        item.get("reason") or "LLM semantic reconciliation decision"
-                    ),
+                    confidence_score=Decimal(str(candidate["confidence"])),
+                    algorithm_used="heuristic_global_fallback",
+                    amount_delta=candidate["amount_delta"],
+                    date_delta_days=candidate["date_delta_days"],
+                    auto_accepted=False,
+                    llm_reason=str(candidate["reason"]),
                 )
-                db.add(match_record)
-                persisted_matches.append(match_record)
-
-                matched_left_ids.add(left_id)
-                matched_right_ids.add(right_id)
+                db.add(global_fallback_match)
+                persisted_matches.append(global_fallback_match)
+                matched_left_ids.add(left_txn.id)
+                matched_right_ids.add(best_right.id)
 
             unmatched_left_ids = set(side_a_by_id.keys()) - matched_left_ids
             unmatched_right_ids = set(side_b_by_id.keys()) - matched_right_ids
-            unmatched_left_reasons = self._reason_by_transaction(
-                llm_response.get("unmatched_left")
-                if isinstance(llm_response, dict)
-                else None
-            )
-            unmatched_right_reasons = self._reason_by_transaction(
-                llm_response.get("unmatched_right")
-                if isinstance(llm_response, dict)
-                else None
-            )
 
             for txn_id in unmatched_left_ids:
                 db.add(
@@ -795,6 +1608,9 @@ class MappedReconciliationService:
                 "exceptions": [],
                 "discrepancies": [],
                 "metrics": {},
+                "classified_exceptions": [],
+                "reconciliation_summary": {},
+                "journal_entries": [],
             }
 
         batch_id = str(uuid4())
@@ -817,6 +1633,8 @@ class MappedReconciliationService:
             mapping_index,
             side_name,
         ) in side_payload:
+            pending_rows: list[dict[str, Any]] = []
+
             for idx, row in frame.iterrows():
                 normalize_payload, mapped_fields = self._build_normalize_payload(
                     row, mapping_index
@@ -846,6 +1664,41 @@ class MappedReconciliationService:
                 db.add(raw)
                 db.flush()
 
+                pending_rows.append(
+                    {
+                        "row_number": int(idx) + 1,
+                        "raw": raw,
+                        "raw_payload": raw_payload,
+                        "normalize_payload": normalize_payload,
+                        "mapped_fields": mapped_fields,
+                    }
+                )
+
+            enrichment_by_id: dict[str, dict[str, Any]] = {}
+            if self.llm_row_enrichment_enabled and pending_rows:
+                enrichment_by_id = bulk_enrich_records(
+                    records=[
+                        {
+                            "raw_transaction_id": pending["raw"].id,
+                            "scenario_type": scenario_type,
+                            "description": pending["normalize_payload"].get("description"),
+                            "counterparty": pending["normalize_payload"].get("counterparty"),
+                            "reference": pending["normalize_payload"].get("reference"),
+                            "invoice_ref": pending["normalize_payload"].get("invoice_ref"),
+                        }
+                        for pending in pending_rows
+                    ],
+                    llm_client=self.llm_client,
+                    batch_size=self.llm_normalization_batch_size,
+                )
+
+            for pending in pending_rows:
+                row_number = pending["row_number"]
+                raw = pending["raw"]
+                raw_payload = pending["raw_payload"]
+                normalize_payload = pending["normalize_payload"]
+                mapped_fields = pending["mapped_fields"]
+
                 try:
                     norm = normalize_record(
                         raw=normalize_payload,
@@ -854,7 +1707,8 @@ class MappedReconciliationService:
                         source_system=source_system,
                         raw_transaction_id=raw.id,
                         side=side,
-                        llm_client=self.llm_client,
+                        llm_client=None,
+                        enrichment_override=enrichment_by_id.get(raw.id),
                     )
                     norm_data = norm.model_dump()
                     metadata = norm_data.get("metadata_json") or {}
@@ -863,7 +1717,7 @@ class MappedReconciliationService:
                             "mapped_fields": mapped_fields,
                             "source_label": source_system,
                             "ingestion_batch_id": batch_id,
-                            "row_number": int(idx) + 1,
+                            "row_number": row_number,
                         }
                     )
                     norm_data["metadata_json"] = metadata
@@ -882,7 +1736,7 @@ class MappedReconciliationService:
                             "scope": "row",
                             "severity": "error",
                             "side": side_name,
-                            "row_number": int(idx) + 1,
+                            "row_number": row_number,
                             "message": str(exc),
                         }
                     )
@@ -906,6 +1760,9 @@ class MappedReconciliationService:
                 "exceptions": [],
                 "discrepancies": [],
                 "metrics": {},
+                "classified_exceptions": [],
+                "reconciliation_summary": {},
+                "journal_entries": [],
             }
 
         period_start = min(all_dates)
@@ -953,8 +1810,10 @@ class MappedReconciliationService:
                     "amount": str(txn.amount),
                     "transaction_date": str(txn.transaction_date),
                     "currency": txn.currency,
+                    "direction": txn.direction.value,
                     "reference": txn.reference_number,
                     "counterparty": txn.counterparty_normalized,
+                    "description": txn.description_clean,
                     "mapped_snapshot": (raw.raw_payload or {}).get("mapped_fields", {})
                     if raw
                     else {},
@@ -968,6 +1827,21 @@ class MappedReconciliationService:
                     "transaction": exception_map.get(exception["txn"]),
                 }
             )
+
+        classified_exceptions = self._classify_exceptions(
+            left_label=left_label,
+            right_label=right_label,
+            exceptions=enriched_exceptions,
+        )
+        reconciliation_summary = self._build_reconciliation_summary(
+            left_df=left_df,
+            right_df=right_df,
+            classified_exceptions=classified_exceptions,
+        )
+        journal_entries = self._build_journal_entries(
+            classified_exceptions=classified_exceptions,
+            period_end=period_end,
+        )
 
         return {
             "status": job.status.value,
@@ -991,6 +1865,9 @@ class MappedReconciliationService:
             "matches": results.get("matches", []),
             "exceptions": enriched_exceptions,
             "exception_buckets": results.get("exception_buckets", {}),
+            "classified_exceptions": classified_exceptions,
+            "reconciliation_summary": reconciliation_summary,
+            "journal_entries": journal_entries,
             "reconciliation_engine": "llm",
             "discrepancies": self._build_discrepancies(db, job.id),
         }

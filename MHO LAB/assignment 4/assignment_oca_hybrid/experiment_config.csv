@@ -1,0 +1,4 @@
+algorithm,selected_params,scenario,n_waypoints,pop_size,tune_iterations,final_iterations,tune_runs,final_runs
+PSO,"{'w': 0.8, 'c1': 1.8, 'c2': 1.8}",Maze,8.0,40.0,120.0,200.0,5.0,10.0
+GWO,{},Maze,8.0,40.0,120.0,200.0,5.0,10.0
+OCA,"{'num_p_cores': 5, 'initial_voltage': 2.0, 'final_voltage': 0.0, 'aggressive_voltage': True}",Maze,8.0,40.0,120.0,200.0,5.0,10.0

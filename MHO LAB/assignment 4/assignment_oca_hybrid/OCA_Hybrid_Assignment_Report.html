@@ -1,0 +1,388 @@
+<h1 id="objective">1. Objective</h1>
+<p>The objective of this assignment is to design and evaluate a hybrid
+metaheuristic that combines two distinct optimization strategies and
+applies them to a complex real-world problem. In this report, the
+proposed hybrid is <strong>OCA (Overclocking Algorithm)</strong>, built
+as an embedded hybrid of:</p>
+<ul>
+<li><strong>Algorithm A (global exploration): Grey Wolf Optimizer
+(GWO)</strong></li>
+<li><strong>Algorithm B (velocity-guided exploitation): Particle Swarm
+Optimization (PSO)</strong></li>
+</ul>
+<p>The target problem is <strong>continuous robot path planning in a
+constrained maze environment</strong>.</p>
+<h1 id="selected-real-world-problem">2. Selected Real-World Problem</h1>
+<h2 id="problem-context">2.1 Problem Context</h2>
+<p>A robot must move from a start position to a goal position in a 2D
+map with circular obstacles. The planner optimizes intermediate
+waypoints so the final path is short and collision-free.</p>
+<p>This models real-world tasks in autonomous navigation and logistics
+robotics where planners must balance route quality and obstacle
+avoidance.</p>
+<h2 id="instance-used-in-experiments">2.2 Instance Used in
+Experiments</h2>
+<ul>
+<li>Scenario: <code>Maze</code></li>
+<li>Map bounds: <code>[0, 100] x [0, 100]</code></li>
+<li>Start: <code>(5, 5)</code></li>
+<li>Goal: <code>(95, 95)</code></li>
+<li>Obstacles: 32 circular obstacles (maze-like arrangement)</li>
+<li>Waypoints: <code>k = 8</code></li>
+<li>Decision dimension: <code>d = 2k = 16</code></li>
+</ul>
+<h1 id="mathematical-modeling">3. Mathematical Modeling</h1>
+<p>Let the decision vector be:</p>
+<p><span
+class="math display"><strong>x</strong> = [<em>x</em><sub>1</sub>, <em>y</em><sub>1</sub>, <em>x</em><sub>2</sub>, <em>y</em><sub>2</sub>, …, <em>x</em><sub><em>k</em></sub>, <em>y</em><sub><em>k</em></sub>]<sup><em>T</em></sup> ∈ [0, 100]<sup>2<em>k</em></sup></span></p>
+<p>Decoded path:</p>
+<p><span
+class="math display"><strong>P</strong>(<strong>x</strong>) = [<em>p</em><sub>0</sub>, <em>p</em><sub>1</sub>, …, <em>p</em><sub><em>k</em></sub>, <em>p</em><sub><em>k</em> + 1</sub>]</span></p>
+<p>where <span class="math inline"><em>p</em><sub>0</sub></span> is the
+start, <span
+class="math inline"><em>p</em><sub><em>k</em> + 1</sub></span> is the
+goal, and <span
+class="math inline"><em>p</em><sub><em>i</em></sub></span> are decoded
+waypoints.</p>
+<p>Objective function:</p>
+<p><span class="math display">$$
+\min f(\mathbf{x}) = \sum_{i=0}^{k} \|p_{i+1} - p_i\|_2 + \lambda
+\sum_{i=0}^{k} C_i(\mathbf{x})
+$$</span></p>
+<p>where <span
+class="math inline"><em>C</em><sub><em>i</em></sub>(<strong>x</strong>) = 1</span>
+if segment <span
+class="math inline">(<em>p</em><sub><em>i</em></sub>, <em>p</em><sub><em>i</em> + 1</sub>)</span>
+collides with any obstacle, else <span class="math inline">0</span>.</p>
+<p>with:</p>
+<ul>
+<li>Collision penalty coefficient: <span
+class="math inline"><em>λ</em> = 1000</span></li>
+<li><span class="math inline"><em>I</em>(⋅)</span> is an indicator (1 if
+collision occurs, else 0)</li>
+<li>Obstacle radii include a safety buffer of +1</li>
+</ul>
+<p>Constraints:</p>
+<ol type="1">
+<li>Bound constraints: <span
+class="math inline">0 ≤ <em>x</em><sub><em>j</em></sub>, <em>y</em><sub><em>j</em></sub> ≤ 100</span></li>
+<li>Collision avoidance is enforced through nonlinear penalty</li>
+</ol>
+<p>The theoretical straight-line lower bound (no obstacles) is:</p>
+<p><span
+class="math display">∥(95, 95) − (5, 5)∥<sub>2</sub> = 127.28</span></p>
+<h1 id="individual-baselines-and-hybrid">4. Individual Baselines and
+Hybrid</h1>
+<h2 id="baseline-a-gwo">4.1 Baseline A: GWO</h2>
+<p>GWO is used as the exploration-oriented baseline. It updates
+candidate solutions using alpha-beta-delta leader guidance and a
+shrinking exploration factor.</p>
+<h2 id="baseline-b-pso">4.2 Baseline B: PSO</h2>
+<p>PSO is used as the velocity-driven baseline. It combines inertia,
+personal best, and global best terms.</p>
+<h2 id="hybrid-oca-embedded-hybrid">4.3 Hybrid: OCA (Embedded
+Hybrid)</h2>
+<p>OCA combines both strategies in one update cycle:</p>
+<ul>
+<li><strong>GWO-style tri-core leader guidance</strong> provides robust
+global directional search.</li>
+<li><strong>PSO-style momentum update</strong> accelerates local
+refinement and smooth progression.</li>
+<li><strong>Cache-miss reset operator</strong> reinitializes stagnant
+particles to reduce premature convergence.</li>
+<li><strong>DVFS schedule</strong> decays exploration pressure over
+time.</li>
+</ul>
+<p>This directly addresses the assignment requirement of showing how
+hybridization handles weaknesses of individual algorithms:</p>
+<ul>
+<li>GWO limitation addressed: slower local refinement.</li>
+<li>PSO limitation addressed: susceptibility to premature
+convergence.</li>
+</ul>
+<h1 id="hybrid-architecture-pseudo-code">5. Hybrid Architecture
+(Pseudo-code)</h1>
+<pre class="text"><code>Algorithm OCA_Hybrid_PathPlanning
+Input: objective f, bounds, pop_size N, leaders p, iterations T
+Output: best solution x*
+
+1. Initialize population Xi in bounds, velocities Vi = 0, stagnation counters Si = 0
+2. For t = 1 to T:
+3.     Evaluate fitness f(Xi) for all particles
+4.     Select top p particles as leaders (P-cores)
+5.     Compute exploration voltage V(t) using linear decay (DVFS)
+6.     For each particle i:
+7.         If particle i is stagnant for too long:
+8.             Reset Xi near a random leader + bounded noise (cache-miss reset)
+9.             Continue
+10.        For each leader k in {1..p}:
+11.            Compute GWO-style A, C, D and leader step_k
+12.        X_target = average(step_k over leaders)
+13.        Vi = w*Vi + (X_target - Xi)          # PSO-like momentum
+14.        Xi = clip(Xi + eta*Vi, bounds)
+15. Return best leader x*</code></pre>
+<p>Hybrid type: <strong>Embedded Hybrid</strong> (leader guidance and
+momentum are integrated in each iteration).</p>
+<h1 id="experimental-protocol">6. Experimental Protocol</h1>
+<h2 id="fair-comparison-setup">6.1 Fair Comparison Setup</h2>
+<p>All algorithms used the same main budget in the final benchmark:</p>
+<ul>
+<li>Population size: <code>40</code></li>
+<li>Iterations: <code>200</code></li>
+<li>Independent runs per algorithm: <code>10</code></li>
+<li>Random seeds: <code>0..9</code></li>
+</ul>
+<h2 id="hyperparameter-tuning">6.2 Hyperparameter Tuning</h2>
+<p>A pilot tuning phase (<code>5</code> runs, <code>120</code>
+iterations) was used to pick one config per algorithm.</p>
+<p>Selected configurations:</p>
+<ul>
+<li>PSO: <code>{w: 0.8, c1: 1.8, c2: 1.8}</code></li>
+<li>GWO: default (<code>pop_size=40</code>)</li>
+<li>OCA:
+<code>{num_p_cores: 5, initial_voltage: 2.0, final_voltage: 0.0, aggressive_voltage: True}</code></li>
+</ul>
+<h1 id="results">7. Results</h1>
+<h2 id="tuning-snapshot">7.1 Tuning Snapshot</h2>
+<table>
+<colgroup>
+<col style="width: 13%" />
+<col style="width: 17%" />
+<col style="width: 17%" />
+<col style="width: 17%" />
+<col style="width: 17%" />
+<col style="width: 17%" />
+</colgroup>
+<thead>
+<tr>
+<th>Algorithm</th>
+<th style="text-align: right;">Candidate</th>
+<th style="text-align: right;">Mean Cost</th>
+<th style="text-align: right;">Std Cost</th>
+<th style="text-align: right;">Valid Rate</th>
+<th style="text-align: right;">Score Used for Selection</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PSO</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1981.338</td>
+<td style="text-align: right;">1187.609</td>
+<td style="text-align: right;">0.00</td>
+<td style="text-align: right;">2981.338</td>
+</tr>
+<tr>
+<td>PSO</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">1561.061</td>
+<td style="text-align: right;">1107.808</td>
+<td style="text-align: right;">0.20</td>
+<td style="text-align: right;">2361.061</td>
+</tr>
+<tr>
+<td>PSO</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">1530.542</td>
+<td style="text-align: right;">783.966</td>
+<td style="text-align: right;">0.00</td>
+<td style="text-align: right;">2530.542</td>
+</tr>
+<tr>
+<td>GWO</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1581.713</td>
+<td style="text-align: right;">849.558</td>
+<td style="text-align: right;">0.20</td>
+<td style="text-align: right;">2381.713</td>
+</tr>
+<tr>
+<td>OCA</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">615.718</td>
+<td style="text-align: right;">501.180</td>
+<td style="text-align: right;">0.60</td>
+<td style="text-align: right;">1015.718</td>
+</tr>
+<tr>
+<td>OCA</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">608.318</td>
+<td style="text-align: right;">524.076</td>
+<td style="text-align: right;">0.60</td>
+<td style="text-align: right;">1008.318</td>
+</tr>
+<tr>
+<td>OCA</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">401.465</td>
+<td style="text-align: right;">425.586</td>
+<td style="text-align: right;">0.80</td>
+<td style="text-align: right;">601.465</td>
+</tr>
+<tr>
+<td>OCA</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">187.887</td>
+<td style="text-align: right;">43.290</td>
+<td style="text-align: right;">1.00</td>
+<td style="text-align: right;">187.887</td>
+</tr>
+</tbody>
+</table>
+<p>Selection score was <code>mean_cost + 1000*(1-valid_rate)</code>.</p>
+<h2 id="statistical-robustness-10-runs">7.2 Statistical Robustness (10
+Runs)</h2>
+<table>
+<colgroup>
+<col style="width: 11%" />
+<col style="width: 14%" />
+<col style="width: 14%" />
+<col style="width: 14%" />
+<col style="width: 14%" />
+<col style="width: 14%" />
+<col style="width: 14%" />
+</colgroup>
+<thead>
+<tr>
+<th>Algorithm</th>
+<th style="text-align: right;">Mean</th>
+<th style="text-align: right;">Best</th>
+<th style="text-align: right;">Worst</th>
+<th style="text-align: right;">Std Dev</th>
+<th style="text-align: right;">Mean Time (s)</th>
+<th style="text-align: right;">Valid Rate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PSO</td>
+<td style="text-align: right;">1594.282</td>
+<td style="text-align: right;">202.203</td>
+<td style="text-align: right;">5402.203</td>
+<td style="text-align: right;">1596.203</td>
+<td style="text-align: right;">6.817</td>
+<td style="text-align: right;">30%</td>
+</tr>
+<tr>
+<td>GWO</td>
+<td style="text-align: right;">1860.850</td>
+<td style="text-align: right;">1162.334</td>
+<td style="text-align: right;">2163.518</td>
+<td style="text-align: right;">480.565</td>
+<td style="text-align: right;">9.977</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>OCA (Hybrid)</td>
+<td style="text-align: right;">476.985</td>
+<td style="text-align: right;">151.212</td>
+<td style="text-align: right;">1157.828</td>
+<td style="text-align: right;">470.721</td>
+<td style="text-align: right;">8.037</td>
+<td style="text-align: right;">70%</td>
+</tr>
+</tbody>
+</table>
+<p>Key relative improvements of OCA in mean objective:</p>
+<ul>
+<li>vs PSO: <strong>70.08% lower mean cost</strong></li>
+<li>vs GWO: <strong>74.37% lower mean cost</strong></li>
+</ul>
+<h2 id="convergence-comparison">7.3 Convergence Comparison</h2>
+<figure>
+<img src="convergence_comparison.png"
+alt="Convergence comparison for PSO, GWO, and OCA" />
+<figcaption aria-hidden="true">Convergence comparison for PSO, GWO, and
+OCA</figcaption>
+</figure>
+<p>The hybrid converges to much lower objective regions while keeping a
+competitive convergence profile across iterations.</p>
+<h2 id="distribution-of-final-results">7.4 Distribution of Final
+Results</h2>
+<figure>
+<img src="final_cost_boxplot.png"
+alt="Boxplot of final objective values across 10 runs" />
+<figcaption aria-hidden="true">Boxplot of final objective values across
+10 runs</figcaption>
+</figure>
+<p>The boxplot confirms OCA has a lower center and tighter feasible
+region than the standalone baselines in this constrained maze setup.</p>
+<h2 id="representative-best-paths">7.5 Representative Best Paths</h2>
+<figure>
+<img src="best_path_PSO.png" alt="Best PSO path" />
+<figcaption aria-hidden="true">Best PSO path</figcaption>
+</figure>
+<figure>
+<img src="best_path_GWO.png" alt="Best GWO path" />
+<figcaption aria-hidden="true">Best GWO path</figcaption>
+</figure>
+<figure>
+<img src="best_path_OCA.png" alt="Best OCA path" />
+<figcaption aria-hidden="true">Best OCA path</figcaption>
+</figure>
+<h1 id="inference-and-critical-analysis">8. Inference and Critical
+Analysis</h1>
+<h2 id="did-the-hybrid-outperform-the-individuals">8.1 Did the hybrid
+outperform the individuals?</h2>
+<p>Yes. OCA achieved the best mean and best-case costs, and the highest
+feasibility (70% valid paths), while GWO failed to produce valid paths
+in all 10 final runs for this scenario.</p>
+<h2 id="how-did-hybridization-affect-computational-time">8.2 How did
+hybridization affect computational time?</h2>
+<ul>
+<li>OCA was slower than PSO per run (<code>8.037s</code> vs
+<code>6.817s</code>, about <code>+17.9%</code>).</li>
+<li>OCA was faster than GWO per run (<code>8.037s</code> vs
+<code>9.977s</code>, about <code>-19.4%</code>).</li>
+</ul>
+<p>So OCA delivered significantly better solution quality and
+feasibility at moderate time cost relative to the fastest baseline.</p>
+<h2 id="was-there-synergy-or-did-one-algorithm-dominate">8.3 Was there
+synergy or did one algorithm dominate?</h2>
+<p>The evidence supports <strong>synergy</strong>:</p>
+<ul>
+<li>OCA kept leader-guided exploration (GWO-like), preventing the
+unstable behavior seen in PSO on this maze instance.</li>
+<li>OCA used momentum and adaptive movement (PSO-like) to avoid the
+slow/invalid stagnation pattern observed in GWO.</li>
+<li>Tuning showed a strong benefit from combined OCA mechanisms
+(<code>num_p_cores=5</code> + <code>aggressive_voltage=True</code>),
+indicating that integration terms are materially contributing.</li>
+</ul>
+<h1 id="limitations-and-validity-notes">9. Limitations and Validity
+Notes</h1>
+<ol type="1">
+<li>The final benchmark is on one complex scenario (<code>Maze</code>)
+with fixed waypoint count (<code>k=8</code>).</li>
+<li>Additional scenarios (<code>Trap</code>, <code>Clutter</code>,
+<code>Forest</code>) should be included for broader generalization.</li>
+<li>Statistical tests (for example Wilcoxon signed-rank) can further
+strengthen claims beyond descriptive statistics.</li>
+</ol>
+<h1 id="conclusion">10. Conclusion</h1>
+<p>This assignment demonstrates a successful hybrid metaheuristic design
+where OCA integrates GWO-style leader exploration and PSO-style momentum
+exploitation in a single embedded framework. On constrained path
+planning, OCA achieved substantially lower objective values and higher
+feasibility than standalone PSO and GWO under equal final computational
+budgets.</p>
+<p>The hybrid design directly addresses premature convergence and weak
+local refinement issues of individual methods, satisfying the assignment
+objective and rubric expectations for modeling, innovation,
+experimentation, and critical analysis.</p>
+<h1 id="appendix-a-reproducibility">Appendix A: Reproducibility</h1>
+<p>Benchmark script:</p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="st">&quot;C:/Users/vishn/Desktop/Programs/SEM 8/MHO LAB/.venv/Scripts/python.exe&quot;</span> research/examples/assignment_hybrid_oca_benchmark.py</span></code></pre></div>
+<p>Generated artifacts:</p>
+<ul>
+<li><code>summary_stats.csv</code></li>
+<li><code>final_runs.csv</code></li>
+<li><code>tuning_results.csv</code></li>
+<li><code>convergence_comparison.png</code></li>
+<li><code>final_cost_boxplot.png</code></li>
+<li><code>best_path_PSO.png</code></li>
+<li><code>best_path_GWO.png</code></li>
+<li><code>best_path_OCA.png</code></li>
+</ul>

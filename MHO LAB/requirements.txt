@@ -70,7 +70,28 @@ ipykernel>=6.25.0
 notebook>=7.0.0
 
 # ============================================================================
-# Installation Instructions
+# RAG Hyperparameter Optimization Dependencies
+# ============================================================================
+
+# RAG & LangChain
+langchain>=0.1.0
+langchain-community>=0.0.10
+langchain-chroma>=0.1.0
+
+# Vector Store
+chromadb>=0.4.0
+
+# Embeddings
+sentence-transformers>=2.2.0
+
+# LLM
+ollama>=0.1.0
+
+# PDF Processing
+pypdf>=3.0.0
+
+# ============================================================================
+# Installation Instructions for RAG Project
 # ============================================================================
 # 1. Create virtual environment:
 #    python -m venv .venv
@@ -82,8 +103,13 @@ notebook>=7.0.0
 # 3. Install dependencies:
 #    pip install -r requirements.txt
 #
-# 4. For development mode (editable install):
-#    pip install -e .
+# 4. Pull required Ollama model:
+#    ollama pull phi3
+#    # or
+#    ollama pull tinyllama
+#
+# 5. Run the optimization:
+#    python main.py
 #
 # ============================================================================
 # Quick Test

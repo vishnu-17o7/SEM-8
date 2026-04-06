@@ -28,13 +28,17 @@ if curr_dir not in sys.path:
 if research_path not in sys.path:
     sys.path.append(research_path)
 
-# Try importing the research algorithms
+# Try importing algorithms from multiple layouts.
 try:
     from research.oca import OverclockingAlgorithm
     from research.baselines import PSO, GWO, DE, GA, FA
-except ImportError as e:
-    print(f"Error importing research algorithms: {e}")
-    sys.exit(1)
+except ImportError:
+    try:
+        from oca import OverclockingAlgorithm
+        from baselines import PSO, GWO, DE, GA, FA
+    except ImportError as e:
+        print(f"Error importing research algorithms: {e}")
+        sys.exit(1)
 
 # ============================================
 # PATHFINDING PROBLEM CLASS
